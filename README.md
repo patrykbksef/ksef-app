@@ -1,36 +1,39 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# KSeF Invoice (MVP)
 
-## Getting Started
+Next.js app: Supabase auth, PDF invoice parsing (InterRisk-style layout), FA(3) XML via `ksef-lite`, and submission to **KSeF API 2.0 test** using a **KSeF token** + **NIP**.
 
-First, run the development server:
+## Environment
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+Create `.env.local` (or Vercel env vars):
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_anon_or_publishable_key
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Supabase
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Enable **Email** auth and **Google** OAuth (add redirect URL: `http://localhost:3000/auth/callback` and your production URL).
+2. Run the SQL in [`supabase/migrations/001_profiles_invoices.sql`](supabase/migrations/001_profiles_invoices.sql) in the SQL editor (tables, RLS, profile trigger on signup).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Local dev
 
-## Learn More
+```bash
+pnpm install
+pnpm dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+Open [http://localhost:3000](http://localhost:3000).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Security & validation
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- Server Actions use `getUser()` and re-validate inputs with **Zod** (`lib/validations/`).
+- KSeF token is stored in `profiles.ksef_token` (RLS); treat production data as sensitive.
 
-## Deploy on Vercel
+## KSeF test
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Use credentials from the MF **test** environment. The app calls `https://api-test.ksef.mf.gov.pl/v2`. Your **context NIP** in Settings must match the taxpayer you authenticate as.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## PDF format
+
+The regex parser targets invoices structured like [`invoice-example.pdf`](invoice-example.pdf) (seller block, buyer block, `NIP` lines, line items with net/VAT/gross columns). Other layouts may need parser changes or a future AI step.
