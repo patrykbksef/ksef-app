@@ -37,6 +37,24 @@ async function main() {
   }
   console.log("FA(3) Podmiot1 NIP matches issuer options (not PDF seller).");
 
+  const podmiot2Nip = xml.match(
+    /<Podmiot2>[\s\S]*?<NIP>(\d{10})<\/NIP>/,
+  )?.[1];
+  if (podmiot2Nip !== parsed.seller.nip) {
+    console.error(
+      "Podmiot2 NIP expected parsed.seller.nip (PDF issuer), got:",
+      podmiot2Nip,
+      "expected:",
+      parsed.seller.nip,
+    );
+    process.exit(1);
+  }
+  if (podmiot2Nip === parsed.buyer.nip) {
+    console.error("Podmiot2 must not use PDF buyer (second NIP block) NIP");
+    process.exit(1);
+  }
+  console.log("FA(3) Podmiot2 NIP matches PDF seller (first NIP block).");
+
   const extraPdfs = [
     path.join(__dirname, "..", "invoice-example2.pdf"),
     path.join(

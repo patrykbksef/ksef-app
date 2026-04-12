@@ -10,6 +10,7 @@ import {
 import { parseInterRiskInvoiceText } from "@/lib/invoice/parser";
 import { extractTextFromPdfBuffer } from "@/lib/invoice/pdf-text";
 import { sendInvoiceToKsefWithToken } from "@/lib/ksef/client";
+import { recalcParsedInvoice } from "@/lib/invoice/recalc-parsed-invoice";
 import {
   fileUploadSchema,
   parsedInvoiceSchema,
@@ -194,6 +195,73 @@ export async function uploadInvoice(
 
   revalidatePath("/dashboard");
   redirect(`/invoices/${inserted.id}`);
+}
+
+export type SaveParsedInvoiceState = {
+  error?: string;
+  ok?: boolean;
+};
+
+export async function saveInvoiceParsedData(
+  _prev: SaveParsedInvoiceState,
+  formData: FormData,
+): Promise<SaveParsedInvoiceState> {
+  const idRaw = String(formData.get("invoice_id") ?? "");
+  const idParsed = z.string().uuid().safeParse(idRaw);
+  if (!idParsed.success) {
+    return { error: "Nieprawidłowa faktura" };
+  }
+
+  let unknown: unknown;
+  try {
+    unknown = JSON.parse(String(formData.get("parsed_json") ?? "")) as unknown;
+  } catch {
+    return { error: "Nieprawidłowy format danych" };
+  }
+
+  const first = parsedInvoiceSchema.safeParse(unknown);
+  if (!first.success) {
+    return {
+      error:
+        first.error.issues[0]?.message ?? "Dane faktury nie przeszły walidacji",
+    };
+  }
+
+  const recalced = recalcParsedInvoice(first.data);
+  const final = parsedInvoiceSchema.safeParse(recalced);
+  if (!final.success) {
+    return { error: "Po przeliczeniu kwot dane są niespójne" };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
+
+  if (userErr || !user) {
+    return { error: "Brak sesji — zaloguj się ponownie" };
+  }
+
+  const { error: updErr } = await supabase
+    .from("invoices")
+    .update({
+      parsed_data: final.data,
+      status: "pending_review",
+      xml_content: null,
+      ksef_reference: null,
+      error_message: null,
+    })
+    .eq("id", idParsed.data)
+    .eq("user_id", user.id);
+
+  if (updErr) {
+    return { error: updErr.message };
+  }
+
+  revalidatePath(`/invoices/${idParsed.data}`);
+  revalidatePath("/dashboard");
+  return { ok: true };
 }
 
 export type SendInvoiceState = {

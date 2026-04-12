@@ -87,9 +87,7 @@ export function LoginForm() {
       <CardHeader>
         <CardTitle>KSeF — faktury</CardTitle>
         <CardDescription>
-          {mode === "login"
-            ? "Zaloguj się e-mailem lub przez Google"
-            : "Załóż konto"}
+          {mode === "login" ? "Zaloguj się e-mailem" : "Załóż konto"}
         </CardDescription>
       </CardHeader>
       <Form {...form}>
@@ -148,14 +146,16 @@ export function LoginForm() {
             >
               {mode === "login" ? "Zaloguj się" : "Zarejestruj się"}
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full"
-              onClick={signInWithGoogle}
-            >
-              Kontynuuj z Google
-            </Button>
+            <div className="hidden">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={signInWithGoogle}
+              >
+                Kontynuuj z Google
+              </Button>
+            </div>
             <button
               type="button"
               className="text-muted-foreground text-sm underline"

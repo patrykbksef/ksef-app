@@ -49,11 +49,12 @@ export function buildKsefLiteInvoiceInput(
       address: issuerAddressForKsef(options),
     },
     buyer: {
-      nip: data.buyer.nip,
-      // Empty: ksef-lite puts Nazwa inside DaneIdentyfikacyjne next to NIP; KSeF API
-      // rejects that pairing. Name stays in our UI/DB from PDF only.
+      // Podmiot2 = counterparty on the document: PDF issuer (first NIP / parsed.seller),
+      // not parsed.buyer (your company on the PDF when you receive the invoice).
+      nip: data.seller.nip,
+      // Empty: ksef-lite+NIP+Nazwa in DaneIdentyfikacyjne is often rejected by KSeF.
       name: "",
-      address: joinAddress(data.buyer.addressLines),
+      address: joinAddress(data.seller.addressLines),
     },
     details: {
       invoiceNumber: data.invoiceNumber,

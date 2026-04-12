@@ -70,9 +70,10 @@ export function KsefPayloadPreview({
         <CardDescription>
           Wartości wysyłane do generatora FA(3).{" "}
           <strong className="text-foreground">Sprzedawca (Podmiot1)</strong> —
-          z Ustawień (NIP musi zgadzać się z kontekstem KSeF). Karta „Strony”
-          powyżej pokazuje Twoje dane do KSeF oraz — osobno — sprzedawcę z PDF
-          wyłącznie informacyjnie.
+          z profilu (NIP = kontekst KSeF).{" "}
+          <strong className="text-foreground">Nabywca (Podmiot2)</strong> — z{" "}
+          <span className="font-mono">parsedInvoice.seller</span> (sprzedawca na
+          PDF / pierwszy NIP), nie z drugiego bloku NIP.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6 text-sm">
@@ -108,22 +109,22 @@ export function KsefPayloadPreview({
         </div>
 
         <div>
-          <h3 className="mb-1 font-semibold">Nabywca</h3>
+          <h3 className="mb-1 font-semibold">Nabywca (Podmiot2)</h3>
           <PayloadRow
             pl="NIP"
-            path="buyer.nip"
+            path="buyer.nip ← parsedInvoice.seller.nip"
             xml="Podmiot2 / DaneIdentyfikacyjne / NIP"
             value={input.buyer.nip}
           />
           <PayloadRow
-            pl="Nazwa (tylko z PDF — nie w payloadzie)"
-            path="parsedInvoice.buyer.name"
+            pl="Nazwa (tylko informacja z PDF — nie w payloadzie)"
+            path="parsedInvoice.seller.name"
             xml="— (KSeF weryfikuje NIP; ksef-lite+NIP+Nazwa w DaneIdentyfikacyjne bywa odrzucone)"
-            value={data.buyer.name}
+            value={data.seller.name}
           />
           <PayloadRow
             pl="Adres (łączony)"
-            path="buyer.address"
+            path="buyer.address ← parsedInvoice.seller"
             xml="Podmiot2 / Adres (KodKraju, AdresL1, AdresL2)"
             value={input.buyer.address}
           />

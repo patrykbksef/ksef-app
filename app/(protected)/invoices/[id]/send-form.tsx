@@ -10,10 +10,21 @@ import {
   type SendInvoiceState,
 } from "@/lib/actions/invoices";
 
-function Submit() {
+function Submit({
+  disabled,
+  title,
+}: {
+  disabled?: boolean;
+  title?: string;
+}) {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" disabled={pending} size="lg">
+    <Button
+      type="submit"
+      disabled={pending || disabled}
+      size="lg"
+      title={title}
+    >
       {pending ? "Wysyłanie…" : "Wyślij do KSeF (test)"}
     </Button>
   );
@@ -24,9 +35,13 @@ const initial: SendInvoiceState = {};
 export function SendToKsefForm({
   invoiceId,
   canSend,
+  sendDisabled,
+  sendDisabledReason,
 }: {
   invoiceId: string;
   canSend: boolean;
+  sendDisabled?: boolean;
+  sendDisabledReason?: string;
 }) {
   const router = useRouter();
   const [state, formAction] = useActionState(sendInvoiceToKsef, initial);
@@ -50,7 +65,7 @@ export function SendToKsefForm({
   return (
     <form action={formAction} className="flex flex-wrap items-center gap-3">
       <input type="hidden" name="invoice_id" value={invoiceId} />
-      <Submit />
+      <Submit disabled={sendDisabled} title={sendDisabledReason} />
     </form>
   );
 }
