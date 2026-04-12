@@ -343,3 +343,101 @@ export async function sendInvoiceToKsefWithToken(options: {
   }
   return parsed.data;
 }
+
+/** First page of POST /invoices/query/metadata (same contract as ksef-lite). */
+type InvoiceMetadataApiResponse = {
+  invoices?: Array<Record<string, unknown>>;
+  hasMore?: boolean;
+  isTruncated?: boolean;
+  permanentStorageHwmDate?: string;
+};
+
+/** Normalized row for dashboard / JSON API (field names vary slightly in KSeF responses). */
+export type KsefInvoiceListRow = {
+  ksefNumber: string;
+  invoiceNumber: string | null;
+  issueDate: string | null;
+  invoicingDate: string | null;
+  grossAmount: string | null;
+  netAmount: string | null;
+  buyerIdentifier: string | null;
+};
+
+function pickStr(obj: Record<string, unknown>, keys: string[]): string | null {
+  for (const k of keys) {
+    const v = obj[k];
+    if (v != null && String(v).trim() !== "") return String(v);
+  }
+  return null;
+}
+
+function normalizeMetadataRow(row: Record<string, unknown>): KsefInvoiceListRow | null {
+  const ksefNumber = pickStr(row, ["ksefNumber", "ksefReferenceNumber"]);
+  if (!ksefNumber) return null;
+  return {
+    ksefNumber,
+    invoiceNumber: pickStr(row, ["invoiceNumber", "invoiceNo", "number"]),
+    issueDate: pickStr(row, ["issueDate", "invoiceIssueDate", "issueDateTime"]),
+    invoicingDate: pickStr(row, ["invoicingDate", "acquisitionDate"]),
+    grossAmount: pickStr(row, ["grossAmount", "gross", "totalGross"]),
+    netAmount: pickStr(row, ["netAmount", "net", "totalNet"]),
+    buyerIdentifier: pickStr(row, [
+      "buyerNip",
+      "buyerIdentifier",
+      "counterpartyIdentifier",
+      "counterpartyNip",
+    ]),
+  };
+}
+
+const RECENT_INVOICES_PAGE_SIZE = 20;
+const RECENT_INVOICES_LOOKBACK_DAYS = 90;
+
+/**
+ * Recent invoices from KSeF (metadata query), newest first. Uses token auth + API 2.0 demo base.
+ * Subject1 = context NIP as seller (issued invoices).
+ */
+export async function queryRecentKsefInvoicesMetadata(options: {
+  nip: string;
+  ksefToken: string;
+}): Promise<{ invoices: KsefInvoiceListRow[]; hasMore: boolean }> {
+  const accessToken = await authenticateWithKsefToken(options.nip, options.ksefToken);
+  const to = new Date();
+  const from = new Date(to);
+  from.setUTCDate(from.getUTCDate() - RECENT_INVOICES_LOOKBACK_DAYS);
+  const fromIso = from.toISOString();
+  const toIso = to.toISOString();
+
+  const qs = new URLSearchParams({
+    sortOrder: "Desc",
+    pageOffset: "0",
+    pageSize: String(RECENT_INVOICES_PAGE_SIZE),
+  });
+  const path = `/invoices/query/metadata?${qs.toString()}`;
+  const body = {
+    subjectType: "Subject1",
+    dateRange: {
+      dateType: "PermanentStorage",
+      from: fromIso,
+      to: toIso,
+    },
+  };
+
+  const res = await ksefJson<InvoiceMetadataApiResponse>(path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(body),
+    timeoutMs: 90_000,
+  });
+
+  const raw = res.invoices ?? [];
+  const invoices: KsefInvoiceListRow[] = [];
+  for (const item of raw) {
+    const n = normalizeMetadataRow(item);
+    if (n) invoices.push(n);
+  }
+  return { invoices, hasMore: Boolean(res.hasMore) };
+}

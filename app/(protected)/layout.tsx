@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { QueryProvider } from "@/components/providers/query-provider";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function ProtectedLayout({
@@ -46,7 +47,7 @@ export default async function ProtectedLayout({
         </div>
       </header>
       <main className="mx-auto w-full max-w-5xl flex-1 p-4 md:p-6">
-        {children}
+        <QueryProvider>{children}</QueryProvider>
       </main>
     </div>
   );

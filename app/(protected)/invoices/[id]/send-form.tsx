@@ -1,10 +1,12 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useActionState, useEffect, useRef } from "react";
 import { useFormStatus } from "react-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { ksefQueryKeys } from "@/lib/query-keys";
 import {
   sendInvoiceToKsef,
   type SendInvoiceState,
@@ -44,6 +46,7 @@ export function SendToKsefForm({
   sendDisabledReason?: string;
 }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [state, formAction] = useActionState(sendInvoiceToKsef, initial);
   const shown = useRef(false);
 
@@ -51,6 +54,7 @@ export function SendToKsefForm({
     if (state.ok && !shown.current) {
       shown.current = true;
       toast.success("Faktura wysłana do KSeF");
+      void queryClient.invalidateQueries({ queryKey: ksefQueryKeys.recentInvoices });
       router.refresh();
     }
     if (state.error && !shown.current) {
@@ -58,7 +62,7 @@ export function SendToKsefForm({
       toast.error(state.error);
     }
     if (!state.ok && !state.error) shown.current = false;
-  }, [state, router]);
+  }, [state, router, queryClient]);
 
   if (!canSend) return null;
 

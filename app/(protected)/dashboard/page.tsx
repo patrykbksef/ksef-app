@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { invoiceStatusLabel } from "@/lib/i18n/pl";
+import { KsefRecentInvoicesCard } from "./ksef-recent-invoices";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -88,6 +89,8 @@ export default async function DashboardPage() {
           <DashboardUpload disabled={!profileComplete} />
         </CardContent>
       </Card>
+
+      <KsefRecentInvoicesCard profileComplete={profileComplete} />
 
       <Card>
         <CardHeader>
