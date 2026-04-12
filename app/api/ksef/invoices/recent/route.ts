@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { queryRecentKsefInvoicesMetadata } from "@/lib/ksef/client";
+import { resolveKsefEnvironment } from "@/lib/ksef/config";
 import { createClient } from "@/lib/supabase/server";
 import {
+  ksefTokenForProfile,
   profileReadyForKsefXml,
   profileRowSchema,
 } from "@/lib/validations/profile";
@@ -29,7 +31,10 @@ export async function GET() {
 
   if (!p || !profileReadyForKsefXml(p)) {
     return NextResponse.json(
-      { error: "Uzupełnij profil (NIP, token KSeF, dane sprzedawcy)" },
+      {
+        error:
+          "Uzupełnij profil (NIP, token KSeF dla wybranego środowiska, dane sprzedawcy)",
+      },
       { status: 403 },
     );
   }
@@ -37,7 +42,8 @@ export async function GET() {
   try {
     const { invoices, hasMore } = await queryRecentKsefInvoicesMetadata({
       nip: p.nip!,
-      ksefToken: p.ksef_token!,
+      ksefToken: ksefTokenForProfile(p)!,
+      ksefEnvironment: resolveKsefEnvironment(p.ksef_environment),
     });
     return NextResponse.json({ invoices, hasMore });
   } catch (e) {

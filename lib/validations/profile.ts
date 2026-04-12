@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveKsefEnvironment } from "@/lib/ksef/config";
 
 const NIP_WEIGHTS = [6, 5, 7, 2, 3, 4, 5, 6, 7] as const;
 
@@ -37,25 +38,50 @@ const issuerAddressLine2Schema = z
   .max(512, "Druga linia adresu jest zbyt długa")
   .optional();
 
-export const profileFormSchema = z.object({
-  nip: nipSchema,
-  ksef_token: z
-    .string()
-    .trim()
-    .min(1, "Token KSeF jest wymagany")
-    .max(8192, "Token KSeF jest zbyt długi"),
-  auto_send: z.boolean(),
-  issuer_name: issuerNameSchema,
-  issuer_address_line1: issuerAddressLineSchema,
-  issuer_address_line2: issuerAddressLine2Schema,
-});
+const tokenFieldSchema = z
+  .string()
+  .max(8192, "Token jest zbyt długi");
+
+export const ksefEnvironmentSchema = z.enum(["demo", "production"]);
+
+export const profileFormSchema = z
+  .object({
+    nip: nipSchema,
+    ksef_token_demo: tokenFieldSchema,
+    ksef_token_production: tokenFieldSchema,
+    ksef_environment: ksefEnvironmentSchema,
+    auto_send: z.boolean(),
+    issuer_name: issuerNameSchema,
+    issuer_address_line1: issuerAddressLineSchema,
+    issuer_address_line2: issuerAddressLine2Schema,
+  })
+  .superRefine((data, ctx) => {
+    if (data.ksef_environment === "demo") {
+      if (!data.ksef_token_demo.trim()) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Podaj token KSeF dla środowiska demo (wybrane w przełączniku)",
+          path: ["ksef_token_demo"],
+        });
+      }
+    } else if (!data.ksef_token_production.trim()) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "Podaj token KSeF dla środowiska produkcyjnego (wybrane w przełączniku)",
+        path: ["ksef_token_production"],
+      });
+    }
+  });
 
 export type ProfileFormInput = z.infer<typeof profileFormSchema>;
 
 export const profileRowSchema = z.object({
   id: z.string().uuid(),
   nip: z.string().nullable(),
-  ksef_token: z.string().nullable(),
+  ksef_token_demo: z.string().nullable().optional(),
+  ksef_token_production: z.string().nullable().optional(),
+  ksef_environment: ksefEnvironmentSchema.nullable().optional(),
   auto_send: z.boolean(),
   issuer_name: z.string().nullable().optional(),
   issuer_address_line1: z.string().nullable().optional(),
@@ -66,11 +92,20 @@ export const profileRowSchema = z.object({
 
 export type ProfileRow = z.infer<typeof profileRowSchema>;
 
-/** NIP, token, and Podmiot1 fields required before upload/send to KSeF. */
+/** Token used for API calls for the profile's selected environment. */
+export function ksefTokenForProfile(p: ProfileRow): string | null {
+  const env = resolveKsefEnvironment(p.ksef_environment);
+  const raw =
+    env === "production" ? p.ksef_token_production : p.ksef_token_demo;
+  const t = raw?.trim() ?? "";
+  return t.length > 0 ? t : null;
+}
+
+/** NIP, token for active environment, and Podmiot1 fields required before upload/send to KSeF. */
 export function profileReadyForKsefXml(p: ProfileRow): boolean {
   return Boolean(
     p.nip &&
-    p.ksef_token &&
+    ksefTokenForProfile(p) &&
     p.issuer_name?.trim() &&
     p.issuer_address_line1?.trim(),
   );

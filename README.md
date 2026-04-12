@@ -28,7 +28,7 @@ Open [http://localhost:3000](http://localhost:3000).
 ## Security & validation
 
 - Server Actions use `getUser()` and re-validate inputs with **Zod** (`lib/validations/`).
-- KSeF token is stored in `profiles.ksef_token` (RLS); treat production data as sensitive.
+- KSeF tokens are stored in `profiles.ksef_token_demo` and `profiles.ksef_token_production` (RLS); treat production data as sensitive.
 
 ## KSeF test
 

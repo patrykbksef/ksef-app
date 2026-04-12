@@ -13,9 +13,15 @@ export async function saveProfile(
   _prev: ProfileActionState,
   formData: FormData,
 ): Promise<ProfileActionState> {
+  const envRaw = String(formData.get("ksef_environment") ?? "").trim();
   const raw = {
     nip: String(formData.get("nip") ?? "").trim(),
-    ksef_token: String(formData.get("ksef_token") ?? "").trim(),
+    ksef_token_demo: String(formData.get("ksef_token_demo") ?? "").trim(),
+    ksef_token_production: String(
+      formData.get("ksef_token_production") ?? "",
+    ).trim(),
+    ksef_environment:
+      envRaw === "production" || envRaw === "demo" ? envRaw : "demo",
     auto_send:
       formData.get("auto_send") === "true" ||
       formData.get("auto_send") === "on",
@@ -47,7 +53,10 @@ export async function saveProfile(
     {
       id: user.id,
       nip: parsed.data.nip,
-      ksef_token: parsed.data.ksef_token,
+      ksef_token_demo: parsed.data.ksef_token_demo.trim() || null,
+      ksef_token_production:
+        parsed.data.ksef_token_production.trim() || null,
+      ksef_environment: parsed.data.ksef_environment,
       auto_send: parsed.data.auto_send,
       issuer_name: parsed.data.issuer_name,
       issuer_address_line1: parsed.data.issuer_address_line1,

@@ -1,11 +1,17 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { profileRowSchema, type ProfileFormInput } from "@/lib/validations/profile";
+import {
+  profileRowSchema,
+  type ProfileFormInput,
+} from "@/lib/validations/profile";
+import { resolveKsefEnvironment } from "@/lib/ksef/config";
 import { SettingsForm } from "./settings-form";
 
 const emptyProfile: ProfileFormInput = {
   nip: "",
-  ksef_token: "",
+  ksef_token_demo: "",
+  ksef_token_production: "",
+  ksef_environment: "demo",
   auto_send: false,
   issuer_name: "",
   issuer_address_line1: "",
@@ -30,7 +36,9 @@ export default async function SettingsPage() {
   const defaults: ProfileFormInput = parsed?.success
     ? {
         nip: parsed.data.nip ?? "",
-        ksef_token: parsed.data.ksef_token ?? "",
+        ksef_token_demo: parsed.data.ksef_token_demo ?? "",
+        ksef_token_production: parsed.data.ksef_token_production ?? "",
+        ksef_environment: resolveKsefEnvironment(parsed.data.ksef_environment),
         auto_send: parsed.data.auto_send,
         issuer_name: parsed.data.issuer_name ?? "",
         issuer_address_line1: parsed.data.issuer_address_line1 ?? "",

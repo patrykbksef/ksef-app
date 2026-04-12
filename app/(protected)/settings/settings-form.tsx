@@ -25,6 +25,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { saveProfile, type ProfileActionState } from "@/lib/actions/profile";
+import { KSEF_WEB_APP_URL } from "@/lib/ksef/config";
+import { cn } from "@/lib/utils";
 import {
   profileFormSchema,
   type ProfileFormInput,
@@ -45,6 +47,7 @@ export function SettingsForm({ defaultValues }: Props) {
     resolver: zodResolver(profileFormSchema),
     defaultValues,
   });
+  const activeKsefEnv = form.watch("ksef_environment");
   const toastShown = useRef(false);
 
   useEffect(() => {
@@ -64,8 +67,9 @@ export function SettingsForm({ defaultValues }: Props) {
       <CardHeader>
         <CardTitle>KSeF i firma</CardTitle>
         <CardDescription>
-          NIP, nazwa i adres sprzedawcy (Podmiot1 w FA(3)), token KSeF oraz
-          opcjonalna automatyczna wysyłka po wgraniu pliku.
+          NIP, nazwa i adres sprzedawcy (Podmiot1 w FA(3)), osobne tokeny KSeF
+          dla demo i produkcji oraz opcjonalna automatyczna wysyłka po wgraniu
+          pliku.
         </CardDescription>
       </CardHeader>
       <Form {...form}>
@@ -73,7 +77,12 @@ export function SettingsForm({ defaultValues }: Props) {
           onSubmit={form.handleSubmit((values) => {
             const fd = new FormData();
             fd.set("nip", values.nip);
-            fd.set("ksef_token", values.ksef_token);
+            fd.set("ksef_token_demo", values.ksef_token_demo);
+            fd.set(
+              "ksef_token_production",
+              values.ksef_token_production,
+            );
+            fd.set("ksef_environment", values.ksef_environment);
             fd.set("issuer_name", values.issuer_name);
             fd.set("issuer_address_line1", values.issuer_address_line1);
             fd.set("issuer_address_line2", values.issuer_address_line2 ?? "");
@@ -84,6 +93,68 @@ export function SettingsForm({ defaultValues }: Props) {
           })}
         >
           <CardContent className="space-y-4">
+            <FormField
+              control={form.control}
+              name="ksef_environment"
+              render={({ field }) => (
+                <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                  <div className="space-y-2 pr-4">
+                    <FormLabel className="text-base">
+                      Środowisko produkcyjne KSeF
+                    </FormLabel>
+                    <FormDescription className="space-y-2 text-sm leading-relaxed">
+                      <p>
+                        <span className="text-foreground font-medium">
+                          Wyłączone (demo / TR):
+                        </span>{" "}
+                        logujesz się w aplikacji demonstracyjnej i używasz tokenu
+                        z tego środowiska —{" "}
+                        <a
+                          href={KSEF_WEB_APP_URL.demo}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary underline-offset-4 hover:underline"
+                        >
+                          {KSEF_WEB_APP_URL.demo}
+                        </a>
+                        . Faktury testowe{" "}
+                        <strong className="text-foreground">
+                          nie mają skutków prawnych
+                        </strong>{" "}
+                        w realnym obiegu.
+                      </p>
+                      <p>
+                        <span className="text-foreground font-medium">
+                          Włączone (produkcja / PRD):
+                        </span>{" "}
+                        token z oficjalnej aplikacji KSeF —{" "}
+                        <a
+                          href={KSEF_WEB_APP_URL.production}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary underline-offset-4 hover:underline"
+                        >
+                          {KSEF_WEB_APP_URL.production}
+                        </a>
+                        . Wysyłka trafia do{" "}
+                        <strong className="text-foreground">
+                          prawdziwego KSeF
+                        </strong>{" "}
+                        z pełnymi skutkami prawnymi.
+                      </p>
+                    </FormDescription>
+                  </div>
+                  <FormControl>
+                    <Switch
+                      checked={field.value === "production"}
+                      onCheckedChange={(on) =>
+                        field.onChange(on ? "production" : "demo")
+                      }
+                    />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
             <FormField
               control={form.control}
               name="nip"
@@ -148,16 +219,59 @@ export function SettingsForm({ defaultValues }: Props) {
             />
             <FormField
               control={form.control}
-              name="ksef_token"
+              name="ksef_token_demo"
               render={({ field }) => (
-                <FormItem>
-                  <FormLabel>KSeF token</FormLabel>
+                <FormItem
+                  className={cn(
+                    "rounded-lg border-2 border-transparent p-3 transition-colors",
+                    activeKsefEnv === "demo" && "border-primary/60",
+                  )}
+                >
+                  <FormLabel>Token KSeF — demo (TR)</FormLabel>
                   <FormControl>
                     <Input {...field} type="password" autoComplete="off" />
                   </FormControl>
                   <FormDescription>
-                    Przechowywany w Supabase (RLS). W środowisku testowym użyj
-                    tokenu testowego.
+                    Z aplikacji demonstracyjnej —{" "}
+                    <a
+                      href={KSEF_WEB_APP_URL.demo}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary underline-offset-4 hover:underline"
+                    >
+                      {KSEF_WEB_APP_URL.demo}
+                    </a>
+                    . Wymagany, gdy wybrane jest środowisko demo.
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="ksef_token_production"
+              render={({ field }) => (
+                <FormItem
+                  className={cn(
+                    "rounded-lg border-2 border-transparent p-3 transition-colors",
+                    activeKsefEnv === "production" && "border-primary/60",
+                  )}
+                >
+                  <FormLabel>Token KSeF — produkcja (PRD)</FormLabel>
+                  <FormControl>
+                    <Input {...field} type="password" autoComplete="off" />
+                  </FormControl>
+                  <FormDescription>
+                    Z oficjalnej aplikacji KSeF —{" "}
+                    <a
+                      href={KSEF_WEB_APP_URL.production}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary underline-offset-4 hover:underline"
+                    >
+                      {KSEF_WEB_APP_URL.production}
+                    </a>
+                    . Wymagany, gdy wybrane jest środowisko produkcyjne.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>

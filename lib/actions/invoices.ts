@@ -10,13 +10,17 @@ import {
 import { parseInterRiskInvoiceText } from "@/lib/invoice/parser";
 import { extractTextFromPdfBuffer } from "@/lib/invoice/pdf-text";
 import { sendInvoiceToKsefWithToken } from "@/lib/ksef/client";
+import { resolveKsefEnvironment } from "@/lib/ksef/config";
 import { recalcParsedInvoice } from "@/lib/invoice/recalc-parsed-invoice";
 import {
   fileUploadSchema,
   parsedInvoiceSchema,
 } from "@/lib/validations/invoice";
 import { z } from "zod";
-import { profileRowSchema } from "@/lib/validations/profile";
+import {
+  ksefTokenForProfile,
+  profileRowSchema,
+} from "@/lib/validations/profile";
 
 export type UploadInvoiceState = {
   error?: string;
@@ -72,7 +76,7 @@ export async function uploadInvoice(
   if (!xmlOptions) {
     return {
       error:
-        "Uzupełnij w Ustawieniach: NIP, token KSeF, nazwę sprzedawcy i pierwszą linię adresu",
+        "Uzupełnij w Ustawieniach: NIP, token KSeF dla wybranego środowiska (demo lub produkcja), nazwę sprzedawcy i pierwszą linię adresu",
     };
   }
 
@@ -145,8 +149,9 @@ export async function uploadInvoice(
     try {
       const result = await sendInvoiceToKsefWithToken({
         contextNip: xmlOptions.issuerNip,
-        ksefToken: profile.ksef_token!,
+        ksefToken: ksefTokenForProfile(profile)!,
         invoiceXml: xml,
+        ksefEnvironment: resolveKsefEnvironment(profile.ksef_environment),
       });
       ksefRef =
         result.invoiceKsefNumber ?? result.invoiceReferenceNumber ?? null;
@@ -302,7 +307,7 @@ export async function sendInvoiceToKsef(
   if (!prof?.success || !xmlOptions) {
     return {
       error:
-        "Uzupełnij w Ustawieniach: NIP, token KSeF, nazwę sprzedawcy i pierwszą linię adresu",
+        "Uzupełnij w Ustawieniach: NIP, token KSeF dla wybranego środowiska (demo lub produkcja), nazwę sprzedawcy i pierwszą linię adresu",
     };
   }
 
@@ -333,8 +338,9 @@ export async function sendInvoiceToKsef(
   try {
     const result = await sendInvoiceToKsefWithToken({
       contextNip: prof.data.nip!,
-      ksefToken: prof.data.ksef_token!,
+      ksefToken: ksefTokenForProfile(prof.data)!,
       invoiceXml: xml,
+      ksefEnvironment: resolveKsefEnvironment(prof.data.ksef_environment),
     });
     const ksefRef =
       result.invoiceKsefNumber ?? result.invoiceReferenceNumber ?? null;

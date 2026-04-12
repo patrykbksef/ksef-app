@@ -1,8 +1,9 @@
 import { createCipheriv, createHash, constants, publicEncrypt, randomBytes } from "node:crypto";
+import {
+  type KsefEnvironment,
+  ksefApiBaseUrl,
+} from "@/lib/ksef/config";
 import { ksefSendResultSchema, type KsefSendResult } from "@/lib/validations/invoice";
-
-//const KSEF_TEST_BASE = "https://api-test.ksef.mf.gov.pl/v2";
-const KSEF_TEST_BASE = "https://api-demo.ksef.mf.gov.pl/v2";
 function pemFromBase64Cert(base64Cert: string): string {
   const clean = base64Cert.replace(/\s/g, "");
   return `-----BEGIN CERTIFICATE-----\n${clean}\n-----END CERTIFICATE-----`;
@@ -32,12 +33,16 @@ function pickCert(certs: PublicCert[], usage: "KsefTokenEncryption" | "Symmetric
   return c;
 }
 
-async function ksefJson<T>(path: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<T> {
+async function ksefJson<T>(
+  baseUrl: string,
+  path: string,
+  init: RequestInit & { timeoutMs?: number } = {},
+): Promise<T> {
   const { timeoutMs = 60000, ...rest } = init;
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(`${KSEF_TEST_BASE}${path}`, {
+    const res = await fetch(`${baseUrl}${path}`, {
       ...rest,
       signal: controller.signal,
       headers: {
@@ -127,15 +132,20 @@ type RedeemRes = {
 };
 
 /**
- * Authenticate with KSeF test API using a KSeF token + NIP (API 2.0).
+ * Authenticate with KSeF API 2.0 using a KSeF token + NIP.
+ * @param baseUrl e.g. from {@link ksefApiBaseUrl}
  */
-export async function authenticateWithKsefToken(nip: string, ksefToken: string): Promise<string> {
-  const publicCerts = await ksefJson<PublicCert[]>("/security/public-key-certificates", {
+export async function authenticateWithKsefToken(
+  nip: string,
+  ksefToken: string,
+  baseUrl: string,
+): Promise<string> {
+  const publicCerts = await ksefJson<PublicCert[]>(baseUrl, "/security/public-key-certificates", {
     method: "GET",
   });
   const tokenCert = pickCert(publicCerts, "KsefTokenEncryption");
 
-  const challengeRes = await ksefJson<ChallengeRes>("/auth/challenge", {
+  const challengeRes = await ksefJson<ChallengeRes>(baseUrl, "/auth/challenge", {
     method: "POST",
   });
 
@@ -145,7 +155,7 @@ export async function authenticateWithKsefToken(nip: string, ksefToken: string):
   const plaintext = `${ksefToken}|${timestampMs}`;
   const encryptedToken = encryptKsefTokenPayload(plaintext, tokenCert.certificate);
 
-  const init = await ksefJson<AuthInitRes>("/auth/ksef-token", {
+  const init = await ksefJson<AuthInitRes>(baseUrl, "/auth/ksef-token", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -161,7 +171,7 @@ export async function authenticateWithKsefToken(nip: string, ksefToken: string):
   const deadline = Date.now() + 45_000;
   let last: AuthStatusRes | null = null;
   while (Date.now() < deadline) {
-    last = await ksefJson<AuthStatusRes>(`/auth/${encodeURIComponent(ref)}`, {
+    last = await ksefJson<AuthStatusRes>(baseUrl, `/auth/${encodeURIComponent(ref)}`, {
       method: "GET",
       headers: { Authorization: `Bearer ${bearer}` },
     });
@@ -175,7 +185,7 @@ export async function authenticateWithKsefToken(nip: string, ksefToken: string):
     await sleep(1200);
   }
 
-  const redeem = await ksefJson<RedeemRes>("/auth/token/redeem", {
+  const redeem = await ksefJson<RedeemRes>(baseUrl, "/auth/token/redeem", {
     method: "POST",
     headers: { Authorization: `Bearer ${bearer}` },
   });
@@ -184,23 +194,31 @@ export async function authenticateWithKsefToken(nip: string, ksefToken: string):
 }
 
 /**
- * Send FA(3) invoice XML to KSeF test environment using token authentication.
+ * Send FA(3) invoice XML to KSeF using token authentication (demo or production API).
  */
 export async function sendInvoiceToKsefWithToken(options: {
   contextNip: string;
   ksefToken: string;
   invoiceXml: string;
+  ksefEnvironment: KsefEnvironment;
 }): Promise<KsefSendResult> {
+  const baseUrl = ksefApiBaseUrl(options.ksefEnvironment);
   console.error("[KSeF send] start", {
     scope: "ksef.send",
+    ksefEnvironment: options.ksefEnvironment,
+    baseUrl,
     contextNip: options.contextNip,
     xmlLength: options.invoiceXml.length,
     xmlHead: options.invoiceXml.slice(0, 1500),
   });
 
-  const accessToken = await authenticateWithKsefToken(options.contextNip, options.ksefToken);
+  const accessToken = await authenticateWithKsefToken(
+    options.contextNip,
+    options.ksefToken,
+    baseUrl,
+  );
 
-  const publicCerts = await ksefJson<PublicCert[]>("/security/public-key-certificates", {
+  const publicCerts = await ksefJson<PublicCert[]>(baseUrl, "/security/public-key-certificates", {
     method: "GET",
   });
   const symCert = pickCert(publicCerts, "SymmetricKeyEncryption");
@@ -215,7 +233,7 @@ export async function sendInvoiceToKsefWithToken(options: {
     symmetricKey,
   );
 
-  const sessionOpen = await ksefJson<{ referenceNumber: string }>("/sessions/online", {
+  const sessionOpen = await ksefJson<{ referenceNumber: string }>(baseUrl, "/sessions/online", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -238,6 +256,7 @@ export async function sendInvoiceToKsefWithToken(options: {
   const enc = encryptInvoicePayload(options.invoiceXml, symmetricKey, iv);
 
   const invoiceSend = await ksefJson<{ referenceNumber: string }>(
+    baseUrl,
     `/sessions/online/${encodeURIComponent(sessionRef)}/invoices`,
     {
       method: "POST",
@@ -266,7 +285,7 @@ export async function sendInvoiceToKsefWithToken(options: {
   });
 
   try {
-    await ksefJson(`/sessions/online/${encodeURIComponent(sessionRef)}/close`, {
+    await ksefJson(baseUrl, `/sessions/online/${encodeURIComponent(sessionRef)}/close`, {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}` },
     });
@@ -279,7 +298,7 @@ export async function sendInvoiceToKsefWithToken(options: {
       status?: { code?: number; description?: string };
       invoiceCount?: number;
       successfulInvoiceCount?: number;
-    }>(`/sessions/${encodeURIComponent(sessionRef)}`, {
+    }>(baseUrl, `/sessions/${encodeURIComponent(sessionRef)}`, {
       method: "GET",
       headers: { Authorization: `Bearer ${accessToken}` },
     });
@@ -309,10 +328,14 @@ export async function sendInvoiceToKsefWithToken(options: {
   for (let i = 0; i < 8; i++) {
     const meta = await ksefJson<{
       invoices?: Array<{ ksefNumber?: string; status?: { code?: number } }>;
-    }>(`/sessions/${encodeURIComponent(sessionRef)}/invoices?pageSize=10`, {
+    }>(
+      baseUrl,
+      `/sessions/${encodeURIComponent(sessionRef)}/invoices?pageSize=10`,
+      {
       method: "GET",
       headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    },
+    );
     const inv = meta.invoices?.[0];
     console.error("[KSeF send] invoice list poll", {
       scope: "ksef.send",
@@ -394,14 +417,20 @@ const RECENT_INVOICES_PAGE_SIZE = 20;
 const RECENT_INVOICES_LOOKBACK_DAYS = 90;
 
 /**
- * Recent invoices from KSeF (metadata query), newest first. Uses token auth + API 2.0 demo base.
+ * Recent invoices from KSeF (metadata query), newest first. Uses token auth + selected API base.
  * Subject1 = context NIP as seller (issued invoices).
  */
 export async function queryRecentKsefInvoicesMetadata(options: {
   nip: string;
   ksefToken: string;
+  ksefEnvironment: KsefEnvironment;
 }): Promise<{ invoices: KsefInvoiceListRow[]; hasMore: boolean }> {
-  const accessToken = await authenticateWithKsefToken(options.nip, options.ksefToken);
+  const baseUrl = ksefApiBaseUrl(options.ksefEnvironment);
+  const accessToken = await authenticateWithKsefToken(
+    options.nip,
+    options.ksefToken,
+    baseUrl,
+  );
   const to = new Date();
   const from = new Date(to);
   from.setUTCDate(from.getUTCDate() - RECENT_INVOICES_LOOKBACK_DAYS);
@@ -423,7 +452,7 @@ export async function queryRecentKsefInvoicesMetadata(options: {
     },
   };
 
-  const res = await ksefJson<InvoiceMetadataApiResponse>(path, {
+  const res = await ksefJson<InvoiceMetadataApiResponse>(baseUrl, path, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

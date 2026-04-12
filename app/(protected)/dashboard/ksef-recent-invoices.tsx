@@ -118,8 +118,8 @@ export function KsefRecentInvoicesCard({ profileComplete }: { profileComplete: b
       <CardHeader>
         <CardTitle>Ostatnie faktury w KSEF</CardTitle>
         <CardDescription>
-          Do 20 ostatnich faktur (jako sprzedawca / Subject1), z ostatnich 90 dni —
-          środowisko demo API 2.0.
+          Do 20 ostatnich faktur (jako sprzedawca / Subject1), z ostatnich 90 dni.
+          Host API (demo lub produkcja) zgodnie z przełącznikiem w Ustawieniach.
         </CardDescription>
       </CardHeader>
       <CardContent>
