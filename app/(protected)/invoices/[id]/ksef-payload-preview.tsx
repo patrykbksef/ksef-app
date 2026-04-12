@@ -1,11 +1,10 @@
 import type { ReactNode } from "react";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import {
   buildKsefLiteInvoiceInput,
   type BuildFa3XmlOptions,
@@ -64,19 +63,21 @@ export function KsefPayloadPreview({
   const addInfo = input.details.additionalInfo;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Dane przekazywane do KSeF (wejście ksef-lite)</CardTitle>
-        <CardDescription>
-          Wartości wysyłane do generatora FA(3).{" "}
-          <strong className="text-foreground">Sprzedawca (Podmiot1)</strong> —
-          z profilu (NIP = kontekst KSeF).{" "}
-          <strong className="text-foreground">Nabywca (Podmiot2)</strong> — z{" "}
-          <span className="font-mono">parsedInvoice.seller</span> (sprzedawca na
-          PDF / pierwszy NIP), nie z drugiego bloku NIP.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6 text-sm">
+    <Accordion type="single" collapsible className="w-full">
+      <AccordionItem value="ksef-lite-input">
+        <AccordionTrigger className="text-left hover:no-underline">
+          Dane przekazywane do KSeF (wejście ksef-lite)
+        </AccordionTrigger>
+        <AccordionContent>
+          <p className="text-muted-foreground mb-6 text-sm leading-relaxed">
+            Wartości wysyłane do generatora FA(3).{" "}
+            <strong className="text-foreground">Sprzedawca (Podmiot1)</strong> —
+            z profilu (NIP = kontekst KSeF).{" "}
+            <strong className="text-foreground">Nabywca (Podmiot2)</strong> — z{" "}
+            <span className="font-mono">parsedInvoice.seller</span> (sprzedawca
+            na PDF / pierwszy NIP), nie z drugiego bloku NIP.
+          </p>
+          <div className="space-y-6 text-sm">
         <p className="text-muted-foreground border-border/60 bg-muted/40 rounded-md border p-3 text-xs leading-relaxed">
           <strong className="text-foreground">Uwaga:</strong> ksef-lite po
           przetworzeniu wylicza w XML kwoty netto/VAT pozycji (
@@ -311,7 +312,9 @@ export function KsefPayloadPreview({
           <span className="font-mono">grossAmount</span> na pozycjach — kwoty
           wierszy w XML wynikają z ceny i ilości.
         </p>
-      </CardContent>
-    </Card>
+          </div>
+        </AccordionContent>
+      </AccordionItem>
+    </Accordion>
   );
 }

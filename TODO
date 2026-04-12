@@ -1,22 +1,23 @@
 DONE:
 
-TODO:
-
 1. manual update of the field if needed(all fields that are send to ksef should be an
    inputs/textareas, that user can easily edit(so if there is any error, you can update
    it easily))
 2. duze pole do upload
+3. remove google login for now”
+
+TODO:
+
 3. switch between demo and prod environment in settings
    1. display information, that for demo user needs to log in to demo ksef(add link),
       and to prod to prod, and add information, that on demo user can adds demo invoices
       that does not have any influence, but in prod they have layer something
-4. remove google login for now”
-5. update styles(where gaps are missing)
-6. HIDE not needed informations(Dane przekazywane do ksef) section, make it accordion
-7. remove updating invoices to the DB - display invoices from KSEF, add tanstack query
-8. add ai + switch between native and AI functionalities(for Marcin for testing)
-9. change password option
-10. hide for now option for creating accounts
+4. update styles(where gaps are missing)
+5. HIDE not needed informations(Dane przekazywane do ksef) section, make it accordion
+6. remove updating invoices to the DB - display invoices from KSEF, add tanstack query
+7. add ai + switch between native and AI functionalities(for Marcin for testing)
+8. change password option
+9. hide for now option for creating accounts
 
 PROMOWANIE:
 Facebook: "Biura rachunkowe"
