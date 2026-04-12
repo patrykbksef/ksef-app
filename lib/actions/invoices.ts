@@ -27,7 +27,7 @@ export async function uploadInvoice(
 ): Promise<UploadInvoiceState> {
   const file = formData.get("file");
   if (!(file instanceof File)) {
-    return { error: "No file uploaded" };
+    return { error: "Nie wybrano pliku" };
   }
 
   const uploadParsed = fileUploadSchema.safeParse({
@@ -36,7 +36,9 @@ export async function uploadInvoice(
     type: file.type || "application/octet-stream",
   });
   if (!uploadParsed.success) {
-    return { error: uploadParsed.error.issues[0]?.message ?? "Invalid file" };
+    return {
+      error: uploadParsed.error.issues[0]?.message ?? "Nieprawidłowy plik",
+    };
   }
 
   const supabase = await createClient();
@@ -46,7 +48,7 @@ export async function uploadInvoice(
   } = await supabase.auth.getUser();
 
   if (userErr || !user) {
-    return { error: "Not authenticated" };
+    return { error: "Brak sesji — zaloguj się ponownie" };
   }
 
   const { data: profileRaw } = await supabase
@@ -59,7 +61,9 @@ export async function uploadInvoice(
     ? profileRowSchema.safeParse(profileRaw)
     : null;
   if (!profileParsed?.success) {
-    return { error: "Complete your profile in Settings first" };
+    return {
+      error: "Najpierw uzupełnij profil w Ustawieniach",
+    };
   }
 
   const profile = profileParsed.data;
@@ -67,7 +71,7 @@ export async function uploadInvoice(
   if (!xmlOptions) {
     return {
       error:
-        "Complete NIP, KSeF token, seller name, and address line 1 in Settings",
+        "Uzupełnij w Ustawieniach: NIP, token KSeF, nazwę sprzedawcy i pierwszą linię adresu",
     };
   }
 
@@ -85,7 +89,7 @@ export async function uploadInvoice(
       step: "pdf_extract",
       errorMessage,
     });
-    return { error: "Could not read PDF" };
+    return { error: "Nie udało się odczytać pliku PDF" };
   }
 
   let parsedInvoice;
@@ -102,7 +106,10 @@ export async function uploadInvoice(
       errorMessage,
     });
     return {
-      error: e instanceof Error ? e.message : "Failed to parse invoice PDF",
+      error:
+        e instanceof Error
+          ? e.message
+          : "Nie udało się sparsować faktury z PDF",
     };
   }
 
@@ -121,7 +128,9 @@ export async function uploadInvoice(
     });
     return {
       error:
-        e instanceof Error ? e.message : "Failed to build KSeF XML from invoice",
+        e instanceof Error
+          ? e.message
+          : "Nie udało się zbudować XML KSeF z faktury",
     };
   }
 
@@ -180,7 +189,7 @@ export async function uploadInvoice(
       step: "db_insert",
       errorMessage: insErr?.message ?? "no_row",
     });
-    return { error: insErr?.message ?? "Could not save invoice" };
+    return { error: insErr?.message ?? "Nie udało się zapisać faktury" };
   }
 
   revalidatePath("/dashboard");
@@ -199,7 +208,7 @@ export async function sendInvoiceToKsef(
   const idRaw = String(formData.get("invoice_id") ?? "");
   const idParsed = z.string().uuid().safeParse(idRaw);
   if (!idParsed.success) {
-    return { error: "Invalid invoice" };
+    return { error: "Nieprawidłowa faktura" };
   }
 
   const supabase = await createClient();
@@ -209,7 +218,7 @@ export async function sendInvoiceToKsef(
   } = await supabase.auth.getUser();
 
   if (userErr || !user) {
-    return { error: "Not authenticated" };
+    return { error: "Brak sesji — zaloguj się ponownie" };
   }
 
   const { data: profileRaw } = await supabase
@@ -225,7 +234,7 @@ export async function sendInvoiceToKsef(
   if (!prof?.success || !xmlOptions) {
     return {
       error:
-        "Complete NIP, KSeF token, seller name, and address line 1 in Settings",
+        "Uzupełnij w Ustawieniach: NIP, token KSeF, nazwę sprzedawcy i pierwszą linię adresu",
     };
   }
 
@@ -237,12 +246,12 @@ export async function sendInvoiceToKsef(
     .maybeSingle();
 
   if (!invRaw?.parsed_data) {
-    return { error: "Invoice data missing — re-upload the PDF" };
+    return { error: "Brak danych faktury — wgraj ponownie plik PDF" };
   }
 
   const parsedStored = parsedInvoiceSchema.safeParse(invRaw.parsed_data);
   if (!parsedStored.success) {
-    return { error: "Invalid stored invoice — re-upload the PDF" };
+    return { error: "Zapis faktury jest uszkodzony — wgraj ponownie PDF" };
   }
 
   let xml: string;

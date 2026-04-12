@@ -30,7 +30,7 @@ export async function saveProfile(
 
   const parsed = profileFormSchema.safeParse(raw);
   if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+    return { error: parsed.error.issues[0]?.message ?? "Nieprawidłowe dane" };
   }
 
   const supabase = await createClient();
@@ -40,7 +40,7 @@ export async function saveProfile(
   } = await supabase.auth.getUser();
 
   if (userErr || !user) {
-    return { error: "Not authenticated" };
+    return { error: "Brak sesji — zaloguj się ponownie" };
   }
 
   const { error } = await supabase.from("profiles").upsert(

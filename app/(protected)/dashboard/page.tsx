@@ -22,6 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { invoiceStatusLabel } from "@/lib/i18n/pl";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -54,32 +55,33 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Panel</h1>
         <p className="text-muted-foreground text-sm">
-          Upload a PDF invoice and send it to KSeF (test environment).
+          Wgraj fakturę PDF i wyślij ją do KSeF (środowisko testowe).
         </p>
       </div>
 
       {!profileComplete ? (
         <Card className="border-amber-500/50 bg-amber-500/5">
           <CardHeader>
-            <CardTitle className="text-lg">Complete your profile</CardTitle>
+            <CardTitle className="text-lg">Uzupełnij profil</CardTitle>
             <CardDescription>
-              Add NIP, seller name, address, and KSeF token in Settings before
-              uploading invoices.
+              Dodaj NIP, nazwę i adres sprzedawcy oraz token KSeF w Ustawieniach,
+              zanim wgrasz faktury.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <ButtonLink href="/settings">Go to Settings</ButtonLink>
+            <ButtonLink href="/settings">Przejdź do ustawień</ButtonLink>
           </CardContent>
         </Card>
       ) : null}
 
       <Card>
         <CardHeader>
-          <CardTitle>Upload invoice</CardTitle>
+          <CardTitle>Wgraj fakturę</CardTitle>
           <CardDescription>
-            PDF only, max 5 MB. Parser is tuned for InterRisk-style invoices.
+            Tylko PDF, maks. 5 MB. Parser obsługuje m.in. szablony InterRisk,
+            Compensa i Global Assistance.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -89,20 +91,20 @@ export default async function DashboardPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Recent invoices</CardTitle>
-          <CardDescription>Last 20 uploads</CardDescription>
+          <CardTitle>Ostatnie faktury</CardTitle>
+          <CardDescription>20 ostatnich plików</CardDescription>
         </CardHeader>
         <CardContent>
           {!invoicesRaw?.length ? (
-            <p className="text-muted-foreground text-sm">No invoices yet.</p>
+            <p className="text-muted-foreground text-sm">Brak faktur.</p>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>File</TableHead>
+                  <TableHead>Plik</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>KSeF ref</TableHead>
-                  <TableHead>Created</TableHead>
+                  <TableHead>Ref. KSeF</TableHead>
+                  <TableHead>Utworzono</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -117,7 +119,9 @@ export default async function DashboardPage() {
                       </Link>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary">{row.status}</Badge>
+                      <Badge variant="secondary" title={row.status}>
+                        {invoiceStatusLabel(row.status)}
+                      </Badge>
                     </TableCell>
                     <TableCell className="max-w-[180px] truncate font-mono text-xs">
                       {row.ksef_reference ?? "—"}

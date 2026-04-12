@@ -29,6 +29,7 @@ import {
   profileReadyForKsefXml,
   profileRowSchema,
 } from "@/lib/validations/profile";
+import { invoiceStatusLabel } from "@/lib/i18n/pl";
 import { formatIsoDatePl } from "@/lib/utils";
 import { KsefPayloadPreview } from "./ksef-payload-preview";
 import { SendToKsefForm } from "./send-form";
@@ -90,13 +91,15 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
             href="/dashboard"
             className="text-muted-foreground mb-2 inline-block text-sm hover:underline"
           >
-            ← Dashboard
+            ← Panel
           </Link>
           <h1 className="text-2xl font-semibold tracking-tight">
             {inv.data.file_name}
           </h1>
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">{inv.data.status}</Badge>
+            <Badge variant="secondary" title={inv.data.status}>
+              {invoiceStatusLabel(inv.data.status)}
+            </Badge>
             {inv.data.ksef_reference ? (
               <span className="text-muted-foreground font-mono text-xs">
                 KSeF: {inv.data.ksef_reference}
@@ -111,25 +114,58 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
       </div>
 
       {!data ? (
-        <p className="text-muted-foreground text-sm">No parsed data.</p>
+        <p className="text-muted-foreground text-sm">Brak sparsowanych danych.</p>
       ) : (
         <>
           <Card>
             <CardHeader>
-              <CardTitle>Parties</CardTitle>
-              <CardDescription>Seller and buyer from PDF</CardDescription>
+              <CardTitle>Strony</CardTitle>
+              <CardDescription>
+                Sprzedawca w KSeF — z profilu (to trafi do XML); nabywca — z
+                pliku PDF.
+              </CardDescription>
             </CardHeader>
-            <CardContent className="grid gap-6 md:grid-cols-2">
-              <div>
-                <h3 className="mb-1 font-medium">Seller</h3>
-                <p className="text-sm">{data.seller.name}</p>
-                <p className="text-muted-foreground text-sm">
-                  {data.seller.addressLines.join(", ")}
-                </p>
-                <p className="mt-1 font-mono text-sm">NIP {data.seller.nip}</p>
+            <CardContent className="grid gap-8 md:grid-cols-2">
+              <div className="space-y-6">
+                <div>
+                  <h3 className="mb-2 font-semibold">
+                    Sprzedawca (Ty — wysyłane do KSeF)
+                  </h3>
+                  {issuerOptions ? (
+                    <>
+                      <p className="text-sm">{issuerOptions.issuerName}</p>
+                      <p className="text-muted-foreground text-sm">
+                        {[
+                          issuerOptions.issuerAddressLine1,
+                          issuerOptions.issuerAddressLine2?.trim() || "",
+                        ]
+                          .filter(Boolean)
+                          .join(", ")}
+                      </p>
+                      <p className="mt-1 font-mono text-sm">
+                        NIP {issuerOptions.issuerNip}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-muted-foreground text-sm">
+                      Uzupełnij w Ustawieniach NIP, token KSeF, nazwę i adres
+                      sprzedawcy — te dane trafią do KSeF jako Podmiot1.
+                    </p>
+                  )}
+                </div>
+                <div className="border-border/60 border-t pt-4">
+                  <h4 className="text-muted-foreground mb-2 text-sm font-medium">
+                    Sprzedawca na fakturze PDF (informacja)
+                  </h4>
+                  <p className="text-sm">{data.seller.name}</p>
+                  <p className="text-muted-foreground text-sm">
+                    {data.seller.addressLines.join(", ")}
+                  </p>
+                  <p className="mt-1 font-mono text-sm">NIP {data.seller.nip}</p>
+                </div>
               </div>
               <div>
-                <h3 className="mb-1 font-medium">Buyer</h3>
+                <h3 className="mb-2 font-semibold">Nabywca (z PDF)</h3>
                 <p className="text-sm">{data.buyer.name}</p>
                 <p className="text-muted-foreground text-sm">
                   {data.buyer.addressLines.join(", ")}
@@ -173,9 +209,9 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
 
           <Card>
             <CardHeader>
-              <CardTitle>Line items</CardTitle>
+              <CardTitle>Pozycje</CardTitle>
               <CardDescription>
-                Invoice {data.invoiceNumber} ·{" "}
+                Faktura {data.invoiceNumber} ·{" "}
                 {formatIsoDatePl(data.issueDate)} · {data.currency}
               </CardDescription>
             </CardHeader>
@@ -184,11 +220,11 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
                 <TableHeader>
                   <TableRow>
                     <TableHead>#</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Qty</TableHead>
-                    <TableHead>Net</TableHead>
+                    <TableHead>Nazwa</TableHead>
+                    <TableHead>Ilość</TableHead>
+                    <TableHead>Netto</TableHead>
                     <TableHead>VAT %</TableHead>
-                    <TableHead>Gross</TableHead>
+                    <TableHead>Brutto</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -211,12 +247,14 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
 
           <Card>
             <CardHeader>
-              <CardTitle>Totals</CardTitle>
+              <CardTitle>Sumy</CardTitle>
             </CardHeader>
             <CardContent className="text-sm">
-              <p>Net: {data.totals.net.toFixed(2)} PLN</p>
+              <p>Netto: {data.totals.net.toFixed(2)} PLN</p>
               <p>VAT: {data.totals.vat.toFixed(2)} PLN</p>
-              <p className="font-medium">Gross: {data.totals.gross.toFixed(2)} PLN</p>
+              <p className="font-medium">
+                Brutto: {data.totals.gross.toFixed(2)} PLN
+              </p>
             </CardContent>
           </Card>
 
@@ -239,7 +277,9 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
       {inv.data.xml_content ? (
         <Accordion type="single" collapsible className="w-full">
           <AccordionItem value="xml">
-            <AccordionTrigger>FA(3) XML preview (sent to KSeF)</AccordionTrigger>
+            <AccordionTrigger>
+              Podgląd XML FA(3) (wysłany do KSeF)
+            </AccordionTrigger>
             <AccordionContent>
               <pre className="bg-muted max-h-[480px] overflow-auto rounded-md p-4 text-xs whitespace-pre-wrap">
                 {inv.data.xml_content}

@@ -27,12 +27,12 @@ function normalizeInterRiskPartyLines(lines: string[]): string[] {
  */
 /** InterRisk: `3.501 km. 235.00` = 3.50 × 235 km (glued digit before unit). */
 const INTERRISK_LINE_ROW =
-  /^(.+?)\s+(\d+)([.,]\d{2})(\d)\s+(km\.|ope\.)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s*$/;
+  /^(.+?)\s+(\d+)([.,]\d{2})(\d)\s+(km\.|ope\.|h\.)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s*$/;
 
 /** Legacy: split `3.501 km.` → `3.50 1 km.` — wrong when `1` belongs to `235`. */
 function normalizeFusedPriceQtyRow(line: string): string {
   return line.replace(
-    /(\d+)\.(\d{2})(\d)(\s+(?:km\.|ope\.))/g,
+    /(\d+)\.(\d{2})(\d)(\s+(?:km\.|ope\.|h\.))/g,
     "$1.$2 $3$4",
   );
 }
@@ -93,8 +93,16 @@ function extractInvoiceNumber(text: string): string | null {
 }
 
 function extractNips(text: string): string[] {
-  const matches = text.matchAll(/\bNIP\s*(\d{10})\b/gi);
+  const matches = text.matchAll(
+    /\b(?:NIP|TAX\s+NUMBER):?\s*(\d{10})\b/gi,
+  );
   return [...matches].map((m) => m[1]!);
+}
+
+/** Match seller/buyer lines: `NIP 123…`, `NIP: 123…`, `TAX NUMBER: 123…`, `TAX NUMBER 123…`. */
+function findNipLineIndex(lines: string[], nip: string): number {
+  const pattern = new RegExp(`(?:NIP|TAX\\s+NUMBER):?\\s*${nip}`);
+  return lines.findIndex((l) => pattern.test(l));
 }
 
 function extractPolishDates(text: string): string[] {
@@ -110,9 +118,9 @@ function parseLineItemLine(line: string, lineNumber: number) {
   const vatAmt = parsePlNumber(parts[parts.length - 2]!);
   const vatRate = parsePlNumber(parts[parts.length - 3]!);
   const netAmt = parsePlNumber(parts[parts.length - 4]!);
-  void parsePlNumber(parts[parts.length - 5]!);
+  const qty = parsePlNumber(parts[parts.length - 5]!);
   const unit = parts[parts.length - 6]!;
-  const qty = parsePlNumber(parts[parts.length - 7]!);
+  void parsePlNumber(parts[parts.length - 7]!); // Lp. column (line number), skip
   const netUnitPrice = parsePlNumber(parts[parts.length - 8]!);
   const name = parts.slice(0, parts.length - 8).join(" ");
 
@@ -187,13 +195,13 @@ function extractPayment(text: string) {
 }
 
 function extractReference(text: string) {
-  const m = text.match(/([\d]+\/IR)\s*Numer ref\./i);
+  const m = text.match(/([\d]+\/\w+)\s*Numer ref\./i);
   return m?.[1];
 }
 
 function extractBank(text: string, buyerNip: string) {
-  const lines = text.split(/\r?\n/);
-  const nipIdx = lines.findIndex((l) => l.includes(`NIP ${buyerNip}`));
+  const lines = text.split(/\r?\n/).map((l) => l.trim());
+  const nipIdx = findNipLineIndex(lines, buyerNip);
   if (nipIdx < 0 || nipIdx + 3 >= lines.length) return {};
   const bankName = lines[nipIdx + 1]?.trim();
   const bankAccount = lines[nipIdx + 2]?.trim();
@@ -219,7 +227,7 @@ export function parseInterRiskInvoiceText(rawText: string): ParsedInvoice {
       lineCount,
       textPreview: truncatePreview(text),
     });
-    throw new Error("Could not find invoice number (FAKTURA VAT NR …)");
+    throw new Error("Nie znaleziono numeru faktury (FAKTURA VAT NR …)");
   }
 
   const nips = extractNips(text);
@@ -232,7 +240,7 @@ export function parseInterRiskInvoiceText(rawText: string): ParsedInvoice {
       lineCount,
       textPreview: truncatePreview(text),
     });
-    throw new Error("Could not find seller and buyer NIP");
+    throw new Error("Nie znaleziono NIP sprzedawcy i nabywcy");
   }
   const sellerNip = nips[0]!;
   const buyerNip = nips[1]!;
@@ -242,8 +250,8 @@ export function parseInterRiskInvoiceText(rawText: string): ParsedInvoice {
   const saleDate = dates[1] ?? dates[0] ?? "";
 
   const lines = text.split(/\r?\n/).map((l) => l.trim());
-  const nipSellerIdx = lines.findIndex((l) => l.includes(`NIP ${sellerNip}`));
-  const nipBuyerIdx = lines.findIndex((l) => l.includes(`NIP ${buyerNip}`));
+  const nipSellerIdx = findNipLineIndex(lines, sellerNip);
+  const nipBuyerIdx = findNipLineIndex(lines, buyerNip);
 
   const sellerLinesRaw =
     nipSellerIdx > 0 ? lines.slice(1, nipSellerIdx).filter(Boolean) : [];
@@ -268,22 +276,30 @@ export function parseInterRiskInvoiceText(rawText: string): ParsedInvoice {
       lineCount: lines.length,
       textPreview: truncatePreview(text),
     });
-    throw new Error("Could not locate line items section");
+    throw new Error("Nie znaleziono sekcji pozycji faktury");
   }
   if (itemsEnd < 0) itemsEnd = lines.length;
 
   const lineItems: NonNullable<ReturnType<typeof parseLineItemLine>>[] = [];
   let lp = 0;
+  let pendingNamePrefix = "";
   for (let i = itemsStart + 1; i < itemsEnd; i++) {
     const row = lines[i]!;
-    if (!row || row.startsWith("SPRZEDAWCA")) continue;
+    if (!row || row.startsWith("SPRZEDAWCA")) {
+      pendingNamePrefix = "";
+      continue;
+    }
+    const fullRow = pendingNamePrefix ? `${pendingNamePrefix} ${row}` : row;
     const item =
-      parseInterRiskTableRow(row, lp + 1) ??
-      parseLineItemLine(normalizeFusedPriceQtyRow(row), lp + 1) ??
-      parseLineItemLine(row, lp + 1);
+      parseInterRiskTableRow(fullRow, lp + 1) ??
+      parseLineItemLine(normalizeFusedPriceQtyRow(fullRow), lp + 1) ??
+      parseLineItemLine(fullRow, lp + 1);
     if (item) {
       lineItems.push(item);
       lp++;
+      pendingNamePrefix = "";
+    } else {
+      pendingNamePrefix = fullRow;
     }
   }
 
@@ -301,7 +317,7 @@ export function parseInterRiskInvoiceText(rawText: string): ParsedInvoice {
       lineCount: lines.length,
       sampleRows,
     });
-    throw new Error("No line items parsed — check PDF text layout");
+    throw new Error("Nie udało się odczytać pozycji — sprawdź układ tekstu w PDF");
   }
 
   const { vatSummary: vatFromDoc, totals } = parseVatSummaryAndTotals(text);
@@ -337,12 +353,12 @@ export function parseInterRiskInvoiceText(rawText: string): ParsedInvoice {
     issueDate,
     saleDate,
     seller: {
-      name: sellerLines[0] ?? "Unknown seller",
+      name: sellerLines[0] ?? "Nieznany sprzedawca",
       addressLines: sellerLines.slice(1),
       nip: sellerNip,
     },
     buyer: {
-      name: buyerLines[0] ?? "Unknown buyer",
+      name: buyerLines[0] ?? "Nieznany nabywca",
       addressLines: buyerLines.slice(1),
       nip: buyerNip,
     },
@@ -373,7 +389,7 @@ export function parseInterRiskInvoiceText(rawText: string): ParsedInvoice {
       lineItemCount: lineItems.length,
     });
     throw new Error(
-      `Parsed invoice validation failed: ${parsed.error.message}`,
+      `Walidacja sparsowanej faktury nie powiodła się: ${parsed.error.message}`,
     );
   }
   return parsed.data;

@@ -12,7 +12,7 @@ export const fileUploadSchema = z
       .positive()
       .max(
         MAX_PDF_BYTES,
-        `File must be at most ${MAX_PDF_BYTES / 1024 / 1024} MB`,
+        `Plik może mieć co najwyżej ${MAX_PDF_BYTES / 1024 / 1024} MB`,
       ),
     type: z.string(),
   })
@@ -20,7 +20,7 @@ export const fileUploadSchema = z
     (v) =>
       v.type === "application/pdf" ||
       v.name.toLowerCase().endsWith(".pdf"),
-    { message: "Only PDF files are allowed", path: ["type"] },
+    { message: "Dozwolone są tylko pliki PDF", path: ["type"] },
   );
 
 export type FileUploadInput = z.infer<typeof fileUploadSchema>;

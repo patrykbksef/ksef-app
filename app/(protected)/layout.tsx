@@ -24,10 +24,10 @@ export default async function ProtectedLayout({
         <div className="mx-auto flex h-14 max-w-5xl items-center justify-between gap-4 px-4">
           <nav className="flex items-center gap-6 text-sm font-medium">
             <Link href="/dashboard" className="hover:text-foreground/80">
-              Dashboard
+              Panel
             </Link>
             <Link href="/settings" className="hover:text-foreground/80">
-              Settings
+              Ustawienia
             </Link>
           </nav>
           <form
@@ -40,7 +40,7 @@ export default async function ProtectedLayout({
           >
             <Button type="submit" variant="ghost" size="sm" className="gap-2">
               <LogOut className="size-4" />
-              Sign out
+              Wyloguj
             </Button>
           </form>
         </div>

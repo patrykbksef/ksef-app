@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
+import { toast } from "sonner";
 import { loginSchema, signupSchema, type LoginInput } from "@/lib/validations/auth";
 
 export function LoginForm() {
@@ -53,7 +54,7 @@ export function LoginForm() {
         setError(signErr.message);
         return;
       }
-      alert("Check your email to confirm your account.");
+      toast.success("Sprawdź skrzynkę e-mail, aby potwierdzić konto.");
       return;
     }
 
@@ -84,11 +85,11 @@ export function LoginForm() {
   return (
     <Card className="w-full max-w-md">
       <CardHeader>
-        <CardTitle>KSeF Invoice</CardTitle>
+        <CardTitle>KSeF — faktury</CardTitle>
         <CardDescription>
           {mode === "login"
-            ? "Sign in with email or Google"
-            : "Create an account"}
+            ? "Zaloguj się e-mailem lub przez Google"
+            : "Załóż konto"}
         </CardDescription>
       </CardHeader>
       <Form {...form}>
@@ -104,12 +105,12 @@ export function LoginForm() {
               name="email"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Email</FormLabel>
+                  <FormLabel>E-mail</FormLabel>
                   <FormControl>
                     <Input
                       type="email"
                       autoComplete="email"
-                      placeholder="you@example.com"
+                      placeholder="jan@firma.pl"
                       {...field}
                     />
                   </FormControl>
@@ -122,7 +123,7 @@ export function LoginForm() {
               name="password"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Password</FormLabel>
+                  <FormLabel>Hasło</FormLabel>
                   <FormControl>
                     <Input
                       type="password"
@@ -145,7 +146,7 @@ export function LoginForm() {
               className="w-full"
               disabled={form.formState.isSubmitting}
             >
-              {mode === "login" ? "Sign in" : "Sign up"}
+              {mode === "login" ? "Zaloguj się" : "Zarejestruj się"}
             </Button>
             <Button
               type="button"
@@ -153,7 +154,7 @@ export function LoginForm() {
               className="w-full"
               onClick={signInWithGoogle}
             >
-              Continue with Google
+              Kontynuuj z Google
             </Button>
             <button
               type="button"
@@ -164,8 +165,8 @@ export function LoginForm() {
               }}
             >
               {mode === "login"
-                ? "Need an account? Sign up"
-                : "Already have an account? Sign in"}
+                ? "Nie masz konta? Zarejestruj się"
+                : "Masz już konto? Zaloguj się"}
             </button>
           </CardFooter>
         </form>

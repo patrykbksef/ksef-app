@@ -36,6 +36,32 @@ async function main() {
     process.exit(1);
   }
   console.log("FA(3) Podmiot1 NIP matches issuer options (not PDF seller).");
+
+  const extraPdfs = [
+    path.join(__dirname, "..", "invoice-example2.pdf"),
+    path.join(
+      __dirname,
+      "..",
+      "examples",
+      "invoice-04-03-2026-16-42-2026-03-04-16_42_53.pdf",
+    ),
+  ];
+  for (const p of extraPdfs) {
+    if (!fs.existsSync(p)) continue;
+    const b = fs.readFileSync(p);
+    const ab2 = b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
+    const t = await extractTextFromPdfBuffer(ab2 as ArrayBuffer);
+    const parsed2 = parseInterRiskInvoiceText(t);
+    if (parsed2.lineItems.length < 1) {
+      console.error("Expected line items for", p);
+      process.exit(1);
+    }
+    if (!/^\d{10}$/.test(parsed2.seller.nip) || !/^\d{10}$/.test(parsed2.buyer.nip)) {
+      console.error("Expected seller/buyer NIP for", p);
+      process.exit(1);
+    }
+    console.log("OK parse:", path.basename(p), "lineItems:", parsed2.lineItems.length);
+  }
 }
 
 main().catch((e) => {

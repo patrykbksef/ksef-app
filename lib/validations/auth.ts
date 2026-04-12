@@ -1,14 +1,14 @@
 import { z } from "zod";
 
 export const loginSchema = z.object({
-  email: z.string().email("Enter a valid email address"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
+  email: z.string().email("Podaj prawidłowy adres e-mail"),
+  password: z.string().min(6, "Hasło musi mieć co najmniej 6 znaków"),
 });
 
 export type LoginInput = z.infer<typeof loginSchema>;
 
 export const signupSchema = loginSchema.extend({
-  password: z.string().min(8, "Password must be at least 8 characters"),
+  password: z.string().min(8, "Hasło musi mieć co najmniej 8 znaków"),
 });
 
 export type SignupInput = z.infer<typeof signupSchema>;

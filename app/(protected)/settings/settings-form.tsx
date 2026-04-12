@@ -50,7 +50,7 @@ export function SettingsForm({ defaultValues }: Props) {
   useEffect(() => {
     if (state.ok && !toastShown.current) {
       toastShown.current = true;
-      toast.success("Profile saved");
+      toast.success("Zapisano profil");
     }
     if (state.error && !toastShown.current) {
       toastShown.current = true;
@@ -62,10 +62,10 @@ export function SettingsForm({ defaultValues }: Props) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>KSeF & company</CardTitle>
+        <CardTitle>KSeF i firma</CardTitle>
         <CardDescription>
-          NIP, seller name and address (Podmiot1 in FA(3)), KSeF token, and
-          optional auto-send after upload.
+          NIP, nazwa i adres sprzedawcy (Podmiot1 w FA(3)), token KSeF oraz
+          opcjonalna automatyczna wysyłka po wgraniu pliku.
         </CardDescription>
       </CardHeader>
       <Form {...form}>
@@ -102,13 +102,13 @@ export function SettingsForm({ defaultValues }: Props) {
               name="issuer_name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Seller legal name (Podmiot1)</FormLabel>
+                  <FormLabel>Nazwa prawna sprzedawcy (Podmiot1)</FormLabel>
                   <FormControl>
                     <Input {...field} autoComplete="organization" />
                   </FormControl>
                   <FormDescription>
-                    Shown on the invoice XML as the issuer; must match your
-                    entity for KSeF.
+                    W XML faktury jako wystawca; powinna zgadzać się z podmiotem
+                    w KSeF.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -119,12 +119,12 @@ export function SettingsForm({ defaultValues }: Props) {
               name="issuer_address_line1"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Address line 1</FormLabel>
+                  <FormLabel>Adres — linia 1</FormLabel>
                   <FormControl>
                     <Input {...field} autoComplete="street-address" />
                   </FormControl>
                   <FormDescription>
-                    Street and number (maps to AdresL1 in FA(3)).
+                    Ulica i numer (pole AdresL1 w FA(3)).
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -135,12 +135,12 @@ export function SettingsForm({ defaultValues }: Props) {
               name="issuer_address_line2"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Address line 2 (optional)</FormLabel>
+                  <FormLabel>Adres — linia 2 (opcjonalnie)</FormLabel>
                   <FormControl>
                     <Input {...field} autoComplete="address-line2" />
                   </FormControl>
                   <FormDescription>
-                    City, postal code, etc. (AdresL2).
+                    Kod pocztowy, miejscowość itd. (AdresL2).
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -156,8 +156,8 @@ export function SettingsForm({ defaultValues }: Props) {
                     <Input {...field} type="password" autoComplete="off" />
                   </FormControl>
                   <FormDescription>
-                    Stored in your Supabase project (RLS). Use a test-environment
-                    token for sandbox.
+                    Przechowywany w Supabase (RLS). W środowisku testowym użyj
+                    tokenu testowego.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -169,11 +169,12 @@ export function SettingsForm({ defaultValues }: Props) {
               render={({ field }) => (
                 <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
                   <div className="space-y-0.5">
-                    <FormLabel className="text-base">Auto-send to KSeF</FormLabel>
+                    <FormLabel className="text-base">
+                      Automatyczna wysyłka do KSeF
+                    </FormLabel>
                     <FormDescription>
-                      When on, the app sends to KSeF immediately after a
-                      successful PDF parse. When off, you review on the invoice
-                      page first.
+                      Włączone: wysyłka zaraz po poprawnym sparsowaniu PDF.
+                      Wyłączone: najpierw weryfikacja na stronie faktury.
                     </FormDescription>
                   </div>
                   <FormControl>
@@ -188,7 +189,7 @@ export function SettingsForm({ defaultValues }: Props) {
           </CardContent>
           <CardFooter>
             <Button type="submit" disabled={isPending}>
-              {isPending ? "Saving…" : "Save"}
+              {isPending ? "Zapisywanie…" : "Zapisz"}
             </Button>
           </CardFooter>
         </form>

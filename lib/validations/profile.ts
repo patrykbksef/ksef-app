@@ -16,25 +16,25 @@ export function isValidNipChecksum(digits: string): boolean {
 export const nipSchema = z
   .string()
   .trim()
-  .regex(/^\d{10}$/, "NIP must be exactly 10 digits")
-  .refine(isValidNipChecksum, "Invalid NIP checksum");
+  .regex(/^\d{10}$/, "NIP musi mieć dokładnie 10 cyfr")
+  .refine(isValidNipChecksum, "Nieprawidłowa suma kontrolna NIP");
 
 const issuerNameSchema = z
   .string()
   .trim()
-  .min(1, "Seller legal name is required")
-  .max(512, "Name is too long");
+  .min(1, "Podaj nazwę prawną sprzedawcy")
+  .max(512, "Nazwa jest zbyt długa");
 
 const issuerAddressLineSchema = z
   .string()
   .trim()
-  .min(1, "Address line 1 is required")
-  .max(512, "Address line is too long");
+  .min(1, "Podaj pierwszą linię adresu")
+  .max(512, "Adres jest zbyt długi");
 
 const issuerAddressLine2Schema = z
   .string()
   .trim()
-  .max(512, "Address line is too long")
+  .max(512, "Druga linia adresu jest zbyt długa")
   .optional();
 
 export const profileFormSchema = z.object({
@@ -42,8 +42,8 @@ export const profileFormSchema = z.object({
   ksef_token: z
     .string()
     .trim()
-    .min(1, "KSeF token is required")
-    .max(8192, "KSeF token is too long"),
+    .min(1, "Token KSeF jest wymagany")
+    .max(8192, "Token KSeF jest zbyt długi"),
   auto_send: z.boolean(),
   issuer_name: issuerNameSchema,
   issuer_address_line1: issuerAddressLineSchema,

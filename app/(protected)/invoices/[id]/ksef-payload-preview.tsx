@@ -41,7 +41,7 @@ function PayloadRow({
     <div className="border-border/60 grid gap-1 border-b py-2 text-sm last:border-0 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] md:items-start md:gap-4">
       <div className="min-w-0">
         <div className="font-medium">{pl}</div>
-        <div className="text-muted-foreground font-mono text-[11px] leading-snug">
+        <div className="text-muted-foreground font-mono text-sm leading-snug">
           ({path} → {xml})
         </div>
       </div>
@@ -70,8 +70,9 @@ export function KsefPayloadPreview({
         <CardDescription>
           Wartości wysyłane do generatora FA(3).{" "}
           <strong className="text-foreground">Sprzedawca (Podmiot1)</strong> —
-          z Ustawień (NIP musi zgadzać się z kontekstem KSeF); karta „Parties”
-          powyżej pokazuje sprzedawcę z PDF tylko informacyjnie.
+          z Ustawień (NIP musi zgadzać się z kontekstem KSeF). Karta „Strony”
+          powyżej pokazuje Twoje dane do KSeF oraz — osobno — sprzedawcę z PDF
+          wyłącznie informacyjnie.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6 text-sm">
@@ -298,7 +299,7 @@ export function KsefPayloadPreview({
             pl="Sumy z PDF (tylko informacja — nie w payloadzie)"
             path="parsedInvoice.totals"
             xml="—"
-            value={`net ${data.totals.net.toFixed(2)} · VAT ${data.totals.vat.toFixed(2)} · brutto ${data.totals.gross.toFixed(2)} ${data.currency}`}
+            value={`netto ${data.totals.net.toFixed(2)} · VAT ${data.totals.vat.toFixed(2)} · brutto ${data.totals.gross.toFixed(2)} ${data.currency}`}
           />
         </div>
 

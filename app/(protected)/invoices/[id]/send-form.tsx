@@ -14,7 +14,7 @@ function Submit() {
   const { pending } = useFormStatus();
   return (
     <Button type="submit" disabled={pending} size="lg">
-      {pending ? "Sending…" : "Send to KSeF (test)"}
+      {pending ? "Wysyłanie…" : "Wyślij do KSeF (test)"}
     </Button>
   );
 }
@@ -35,7 +35,7 @@ export function SendToKsefForm({
   useEffect(() => {
     if (state.ok && !shown.current) {
       shown.current = true;
-      toast.success("Invoice sent to KSeF");
+      toast.success("Faktura wysłana do KSeF");
       router.refresh();
     }
     if (state.error && !shown.current) {
