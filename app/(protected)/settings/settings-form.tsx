@@ -302,7 +302,7 @@ export function SettingsForm({ defaultValues }: Props) {
             />
           </CardContent>
           <CardFooter>
-            <Button type="submit" disabled={isPending}>
+            <Button type="submit" disabled={isPending} className="mt-4">
               {isPending ? "Zapisywanie…" : "Zapisz"}
             </Button>
           </CardFooter>
