@@ -1,8 +1,6 @@
 import { createCipheriv, createHash, constants, publicEncrypt, randomBytes } from "node:crypto";
-import {
-  type KsefEnvironment,
-  ksefApiBaseUrl,
-} from "@/lib/ksef/config";
+import { z } from "zod";
+import { type KsefEnvironment, ksefApiBaseUrl } from "@/lib/ksef/config";
 import { ksefSendResultSchema, type KsefSendResult } from "@/lib/validations/invoice";
 function pemFromBase64Cert(base64Cert: string): string {
   const clean = base64Cert.replace(/\s/g, "");
@@ -33,11 +31,7 @@ function pickCert(certs: PublicCert[], usage: "KsefTokenEncryption" | "Symmetric
   return c;
 }
 
-async function ksefJson<T>(
-  baseUrl: string,
-  path: string,
-  init: RequestInit & { timeoutMs?: number } = {},
-): Promise<T> {
+async function ksefJson<T>(baseUrl: string, path: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<T> {
   const { timeoutMs = 60000, ...rest } = init;
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
@@ -135,11 +129,7 @@ type RedeemRes = {
  * Authenticate with KSeF API 2.0 using a KSeF token + NIP.
  * @param baseUrl e.g. from {@link ksefApiBaseUrl}
  */
-export async function authenticateWithKsefToken(
-  nip: string,
-  ksefToken: string,
-  baseUrl: string,
-): Promise<string> {
+export async function authenticateWithKsefToken(nip: string, ksefToken: string, baseUrl: string): Promise<string> {
   const publicCerts = await ksefJson<PublicCert[]>(baseUrl, "/security/public-key-certificates", {
     method: "GET",
   });
@@ -212,11 +202,7 @@ export async function sendInvoiceToKsefWithToken(options: {
     xmlHead: options.invoiceXml.slice(0, 1500),
   });
 
-  const accessToken = await authenticateWithKsefToken(
-    options.contextNip,
-    options.ksefToken,
-    baseUrl,
-  );
+  const accessToken = await authenticateWithKsefToken(options.contextNip, options.ksefToken, baseUrl);
 
   const publicCerts = await ksefJson<PublicCert[]>(baseUrl, "/security/public-key-certificates", {
     method: "GET",
@@ -328,14 +314,10 @@ export async function sendInvoiceToKsefWithToken(options: {
   for (let i = 0; i < 8; i++) {
     const meta = await ksefJson<{
       invoices?: Array<{ ksefNumber?: string; status?: { code?: number } }>;
-    }>(
-      baseUrl,
-      `/sessions/${encodeURIComponent(sessionRef)}/invoices?pageSize=10`,
-      {
+    }>(baseUrl, `/sessions/${encodeURIComponent(sessionRef)}/invoices?pageSize=10`, {
       method: "GET",
       headers: { Authorization: `Bearer ${accessToken}` },
-    },
-    );
+    });
     const inv = meta.invoices?.[0];
     console.error("[KSeF send] invoice list poll", {
       scope: "ksef.send",
@@ -375,14 +357,12 @@ type InvoiceMetadataApiResponse = {
   permanentStorageHwmDate?: string;
 };
 
-/** Normalized row for dashboard / JSON API (field names vary slightly in KSeF responses). */
+/** Fields used by „Ostatnie faktury w KSEF” on the dashboard. */
 export type KsefInvoiceListRow = {
   ksefNumber: string;
   invoiceNumber: string | null;
   issueDate: string | null;
   invoicingDate: string | null;
-  grossAmount: string | null;
-  netAmount: string | null;
   buyerIdentifier: string | null;
 };
 
@@ -394,24 +374,34 @@ function pickStr(obj: Record<string, unknown>, keys: string[]): string | null {
   return null;
 }
 
-function normalizeMetadataRow(row: Record<string, unknown>): KsefInvoiceListRow | null {
-  const ksefNumber = pickStr(row, ["ksefNumber", "ksefReferenceNumber"]);
-  if (!ksefNumber) return null;
-  return {
-    ksefNumber,
-    invoiceNumber: pickStr(row, ["invoiceNumber", "invoiceNo", "number"]),
-    issueDate: pickStr(row, ["issueDate", "invoiceIssueDate", "issueDateTime"]),
-    invoicingDate: pickStr(row, ["invoicingDate", "acquisitionDate"]),
-    grossAmount: pickStr(row, ["grossAmount", "gross", "totalGross"]),
-    netAmount: pickStr(row, ["netAmount", "net", "totalNet"]),
-    buyerIdentifier: pickStr(row, [
-      "buyerNip",
-      "buyerIdentifier",
-      "counterpartyIdentifier",
-      "counterpartyNip",
-    ]),
-  };
+/** KSeF metadata often nests buyer id as `buyer.identifier.value`. */
+function buyerIdentifierFromMetadataRow(row: Record<string, unknown>): string | null {
+  const buyer = row.buyer;
+  if (buyer && typeof buyer === "object") {
+    const id = (buyer as Record<string, unknown>).identifier;
+    if (id && typeof id === "object") {
+      const value = (id as Record<string, unknown>).value;
+      if (value != null && String(value).trim() !== "") return String(value).trim();
+    }
+  }
+  return pickStr(row, ["buyerNip", "buyerIdentifier", "counterpartyIdentifier", "counterpartyNip"]);
 }
+
+const ksefMetadataInvoiceRowSchema = z
+  .object({})
+  .catchall(z.unknown())
+  .transform((row): KsefInvoiceListRow | null => {
+    const r = row as Record<string, unknown>;
+    const ksefNumber = pickStr(r, ["ksefNumber", "ksefReferenceNumber"]);
+    if (!ksefNumber) return null;
+    return {
+      ksefNumber,
+      invoiceNumber: pickStr(r, ["invoiceNumber", "invoiceNo", "number"]),
+      issueDate: pickStr(r, ["issueDate", "invoiceIssueDate", "issueDateTime"]),
+      invoicingDate: pickStr(r, ["invoicingDate", "acquisitionDate"]),
+      buyerIdentifier: buyerIdentifierFromMetadataRow(r),
+    };
+  });
 
 const RECENT_INVOICES_PAGE_SIZE = 20;
 const RECENT_INVOICES_LOOKBACK_DAYS = 90;
@@ -426,11 +416,7 @@ export async function queryRecentKsefInvoicesMetadata(options: {
   ksefEnvironment: KsefEnvironment;
 }): Promise<{ invoices: KsefInvoiceListRow[]; hasMore: boolean }> {
   const baseUrl = ksefApiBaseUrl(options.ksefEnvironment);
-  const accessToken = await authenticateWithKsefToken(
-    options.nip,
-    options.ksefToken,
-    baseUrl,
-  );
+  const accessToken = await authenticateWithKsefToken(options.nip, options.ksefToken, baseUrl);
   const to = new Date();
   const from = new Date(to);
   from.setUTCDate(from.getUTCDate() - RECENT_INVOICES_LOOKBACK_DAYS);
@@ -465,8 +451,9 @@ export async function queryRecentKsefInvoicesMetadata(options: {
   const raw = res.invoices ?? [];
   const invoices: KsefInvoiceListRow[] = [];
   for (const item of raw) {
-    const n = normalizeMetadataRow(item);
-    if (n) invoices.push(n);
+    const parsed = ksefMetadataInvoiceRowSchema.safeParse(item);
+    if (parsed.success && parsed.data) invoices.push(parsed.data);
   }
+
   return { invoices, hasMore: Boolean(res.hasMore) };
 }

@@ -5,19 +5,20 @@ DONE:
    it easily))
 2. duze pole do upload
 3. remove google login for now”
-
-TODO:
-
-3. switch between demo and prod environment in settings
+4. switch between demo and prod environment in settings
    1. display information, that for demo user needs to log in to demo ksef(add link),
       and to prod to prod, and add information, that on demo user can adds demo invoices
       that does not have any influence, but in prod they have layer something
-4. update styles(where gaps are missing)
-5. HIDE not needed informations(Dane przekazywane do ksef) section, make it accordion
-6. remove updating invoices to the DB - display invoices from KSEF, add tanstack query
+5. update styles(where gaps are missing)
+6. HIDE not needed informations(Dane przekazywane do ksef) section, make it accordion
 7. add ai + switch between native and AI functionalities(for Marcin for testing)
-8. change password option
-9. hide for now option for creating accounts
+
+   TODO:
+
+8. PASSWORD POLICY dla nowych kont
+9. remove updating invoices to the DB - display invoices from KSEF, add tanstack query
+10. change password option
+11. hide for now option for creating accounts
 
 PROMOWANIE:
 Facebook: "Biura rachunkowe"
