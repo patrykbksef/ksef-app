@@ -27,6 +27,9 @@ export default async function ProtectedLayout({
             <Link href="/dashboard" className="hover:text-foreground/80">
               Panel
             </Link>
+            <Link href="/dashboard-ai" className="hover:text-foreground/80">
+              Panel AI
+            </Link>
             <Link href="/settings" className="hover:text-foreground/80">
               Ustawienia
             </Link>

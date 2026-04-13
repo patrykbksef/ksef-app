@@ -9,6 +9,14 @@ Create `.env.local` (or Vercel env vars):
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_anon_or_publishable_key
+
+# Panel AI (`/dashboard-ai`) — primary: Google Gemini; optional fallback: OpenAI when Gemini is overloaded
+GOOGLE_GENERATIVE_AI_API_KEY=your_google_ai_studio_key
+# Recommended for reliability when Gemini returns rate limits / high demand:
+OPENAI_API_KEY=sk-your-openai-key
+# Optional overrides
+# GEMINI_INVOICE_MODEL=gemini-2.5-flash
+# OPENAI_INVOICE_MODEL=gpt-4o
 ```
 
 ## Supabase
@@ -36,4 +44,4 @@ Use credentials from the MF **test** environment. The app calls `https://api-tes
 
 ## PDF format
 
-The regex parser targets invoices structured like [`invoice-example.pdf`](invoice-example.pdf) (seller block, buyer block, `NIP` lines, line items with net/VAT/gross columns). Other layouts may need parser changes or a future AI step.
+The classic **Panel** uses a regex parser for InterRisk-style layouts (see [`invoice-example.pdf`](invoice-example.pdf)). **Panel AI** (`/dashboard-ai`) sends the PDF to Gemini and fits arbitrary layouts into the same `ParsedInvoice` schema (requires `GOOGLE_GENERATIVE_AI_API_KEY`).

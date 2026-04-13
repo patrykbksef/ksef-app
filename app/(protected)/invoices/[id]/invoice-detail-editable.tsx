@@ -31,7 +31,11 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { recalcParsedInvoice } from "@/lib/invoice/recalc-parsed-invoice";
-import type { BuildFa3XmlOptions } from "@/lib/invoice/xml-builder";
+import {
+  issuerPartyFromParsed,
+  podmiot2CounterpartyFromParsed,
+  type BuildFa3XmlOptions,
+} from "@/lib/invoice/xml-builder";
 import {
   saveInvoiceParsedData,
   type SaveParsedInvoiceState,
@@ -60,9 +64,9 @@ const lineDraftSchema = z.object({
 });
 
 const invoiceEditFormSchema = z.object({
-  sellerName: z.string().min(1, "Wymagana nazwa"),
-  sellerNip: z.string().min(1, "Wymagany NIP"),
-  sellerAddress: z.string(),
+  counterpartyName: z.string().min(1, "Wymagana nazwa"),
+  counterpartyNip: z.string().min(1, "Wymagany NIP"),
+  counterpartyAddress: z.string(),
   invoiceNumber: z.string().min(1, "Wymagany numer"),
   issueDate: z.string().min(1, "Wymagana data"),
   saleDate: z.string().min(1, "Wymagana data"),
@@ -82,11 +86,15 @@ function toLineDrafts(items: InvoiceLineItem[]): LineDraft[] {
   }));
 }
 
-function toFormValues(p: ParsedInvoice): InvoiceEditFormValues {
+function toFormValues(
+  p: ParsedInvoice,
+  issuerNip: string,
+): InvoiceEditFormValues {
+  const counterparty = podmiot2CounterpartyFromParsed(p, issuerNip);
   return {
-    sellerName: p.seller.name,
-    sellerNip: p.seller.nip,
-    sellerAddress: p.seller.addressLines.join("\n"),
+    counterpartyName: counterparty.name,
+    counterpartyNip: counterparty.nip,
+    counterpartyAddress: counterparty.addressLines.join("\n"),
     invoiceNumber: p.invoiceNumber,
     issueDate: p.issueDate,
     saleDate: p.saleDate,
@@ -125,6 +133,7 @@ function parseDraftLines(
 function buildPayload(
   base: ParsedInvoice,
   values: InvoiceEditFormValues,
+  issuerNip: string,
 ): ParsedInvoice {
   const partialLines = parseDraftLines(values.lineItems);
   const lineItems: InvoiceLineItem[] = partialLines.map((p) => ({
@@ -133,16 +142,34 @@ function buildPayload(
     vatAmount: 0,
     grossAmount: 0,
   }));
+  const cpRef = podmiot2CounterpartyFromParsed(base, issuerNip);
+  const addrLines = values.counterpartyAddress
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const nip = values.counterpartyNip.trim().replace(/\D/g, "").slice(0, 10);
+  const editedParty = {
+    name: values.counterpartyName.trim() || cpRef.name,
+    nip: nip.length === 10 ? nip : cpRef.nip,
+    addressLines: addrLines.length > 0 ? addrLines : [...cpRef.addressLines],
+  };
+  const side = issuerPartyFromParsed(base, issuerNip);
+  if (side === "seller") {
+    return {
+      ...base,
+      seller: base.seller,
+      buyer: editedParty,
+      invoiceNumber: values.invoiceNumber.trim() || base.invoiceNumber,
+      issueDate: values.issueDate.trim() || base.issueDate,
+      saleDate: values.saleDate.trim() || base.saleDate,
+      lineItems,
+      vatSummary: base.vatSummary,
+      totals: base.totals,
+    };
+  }
   return {
     ...base,
-    seller: {
-      name: values.sellerName.trim() || base.seller.name,
-      nip: values.sellerNip.trim().replace(/\D/g, "").slice(0, 10),
-      addressLines: values.sellerAddress
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean),
-    },
+    seller: editedParty,
     buyer: base.buyer,
     invoiceNumber: values.invoiceNumber.trim() || base.invoiceNumber,
     issueDate: values.issueDate.trim() || base.issueDate,
@@ -166,18 +193,27 @@ function InvoiceFormSections({
   const { fields } = useFieldArray({ control, name: "lineItems" });
 
   const watched = useWatch({ control }) as InvoiceEditFormValues | undefined;
+  const issuerNipForPreview = issuerOptions?.issuerNip ?? "";
   const preview = useMemo(() => {
     if (!watched?.lineItems) return recalcParsedInvoice(initial);
-    const draft = buildPayload(initial, watched);
+    const draft = buildPayload(initial, watched, issuerNipForPreview);
     return recalcParsedInvoice(draft);
-  }, [initial, watched]);
+  }, [initial, watched, issuerNipForPreview]);
 
   const invoiceNumber = watched?.invoiceNumber ?? initial.invoiceNumber;
   const issueDate = watched?.issueDate ?? initial.issueDate;
   const saleDate = watched?.saleDate ?? initial.saleDate;
-  const sellerName = watched?.sellerName ?? initial.seller.name;
-  const sellerAddress = watched?.sellerAddress ?? "";
-  const sellerNip = watched?.sellerNip ?? initial.seller.nip;
+
+  const podmiot2Preview = useMemo(
+    () => podmiot2CounterpartyFromParsed(preview, issuerNipForPreview),
+    [preview, issuerNipForPreview],
+  );
+  const issuerPartyOnPdf = useMemo(() => {
+    const side = issuerPartyFromParsed(preview, issuerNipForPreview);
+    if (side === "buyer") return preview.buyer;
+    if (side === "seller") return preview.seller;
+    return preview.seller;
+  }, [preview, issuerNipForPreview]);
 
   return (
     <>
@@ -185,9 +221,10 @@ function InvoiceFormSections({
         <CardHeader>
           <CardTitle>Strony</CardTitle>
           <CardDescription>
-            Podmiot1 w KSeF — z profilu. Podmiot2 — z pierwszego bloku NIP na PDF
-            (sprzedawca na dokumencie), nie z drugiego. Drugi blok to Twoja firma
-            na fakturze (informacja).
+            Podmiot1 w KSeF — z profilu (Twój NIP). Podmiot2 — kontrahent (druga
+            strona transakcji): wybierany po porównaniu NIP z profilu ze
+            sprzedawcą i nabywcą z PDF (jeśli Twój NIP = sprzedawca na PDF, do KSeF
+            idzie nabywca z PDF i odwrotnie).
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-8 md:grid-cols-2">
@@ -220,23 +257,22 @@ function InvoiceFormSections({
             </div>
             <div className="border-border/60 space-y-2 border-t pt-4">
               <h4 className="text-muted-foreground mb-2 text-sm font-medium">
-                Sprzedawca na fakturze PDF (informacja) — edycja wpływa na
-                Podmiot2
+                Kontrahent (Podmiot2) — edycja
               </h4>
               <Input
-                {...register("sellerName")}
-                aria-label="Nazwa sprzedawcy z PDF"
+                {...register("counterpartyName")}
+                aria-label="Nazwa kontrahenta (Podmiot2)"
                 className="text-sm"
               />
               <Textarea
-                {...register("sellerAddress")}
-                aria-label="Adres sprzedawcy z PDF (linie)"
+                {...register("counterpartyAddress")}
+                aria-label="Adres kontrahenta (linie)"
                 rows={3}
                 className="text-sm"
               />
               <Input
-                {...register("sellerNip")}
-                aria-label="NIP sprzedawcy z PDF"
+                {...register("counterpartyNip")}
+                aria-label="NIP kontrahenta"
                 className="font-mono text-sm"
                 maxLength={13}
               />
@@ -245,29 +281,19 @@ function InvoiceFormSections({
           <div className="space-y-6">
             <div>
               <h3 className="mb-2 font-semibold">
-                Kontrahent w XML (Podmiot2) — jak sprzedawca na PDF
+                Kontrahent w KSeF (Podmiot2)
               </h3>
-              <p className="text-sm">{sellerName || "—"}</p>
+              <p className="text-sm">{podmiot2Preview.name || "—"}</p>
               <p className="text-muted-foreground text-sm">
-                {sellerAddress.split("\n").filter(Boolean).join(", ") || "—"}
+                {podmiot2Preview.addressLines.filter(Boolean).join(", ") || "—"}
               </p>
               <p className="mt-1 font-mono text-sm">
                 NIP{" "}
                 {(() => {
-                  const d = sellerNip.replace(/\D/g, "").slice(0, 10);
-                  return d.length === 10 ? d : sellerNip.trim() || "—";
+                  const d = podmiot2Preview.nip.replace(/\D/g, "").slice(0, 10);
+                  return d.length === 10 ? d : podmiot2Preview.nip.trim() || "—";
                 })()}
               </p>
-            </div>
-            <div className="border-border/60 border-t pt-4">
-              <h4 className="text-muted-foreground mb-2 text-sm font-medium">
-                Twoja firma na fakturze PDF (informacja)
-              </h4>
-              <p className="text-sm">{initial.buyer.name}</p>
-              <p className="text-muted-foreground text-sm">
-                {initial.buyer.addressLines.join(", ")}
-              </p>
-              <p className="mt-1 font-mono text-sm">NIP {initial.buyer.nip}</p>
             </div>
           </div>
         </CardContent>
@@ -436,9 +462,11 @@ export function InvoiceDetailPageClient({
   const [savePending, startSaveTransition] = useTransition();
   const toastRef = useRef(false);
 
+  const issuerNip = issuerOptions?.issuerNip ?? "";
+
   const form = useForm<InvoiceEditFormValues>({
     resolver: zodResolver(invoiceEditFormSchema),
-    defaultValues: toFormValues(initial),
+    defaultValues: toFormValues(initial, issuerNip),
     mode: "onChange",
   });
 
@@ -446,10 +474,10 @@ export function InvoiceDetailPageClient({
   const isDirty = formState.isDirty;
 
   useEffect(() => {
-    reset(toFormValues(initial));
+    reset(toFormValues(initial, issuerOptions?.issuerNip ?? ""));
     // Only when server snapshot changes — not when `initial` reference changes alone.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- initial matches parsedSnapshot from parent
-  }, [parsedSnapshot, reset]);
+  }, [parsedSnapshot, reset, issuerOptions?.issuerNip]);
 
   useEffect(() => {
     if (saveState.ok && !toastRef.current) {
@@ -465,7 +493,9 @@ export function InvoiceDetailPageClient({
   }, [saveState, router]);
 
   const onSave = handleSubmit((values) => {
-    const payload = recalcParsedInvoice(buildPayload(initial, values));
+    const payload = recalcParsedInvoice(
+      buildPayload(initial, values, issuerNip),
+    );
     const fd = new FormData();
     fd.set("invoice_id", invoiceId);
     fd.set("parsed_json", JSON.stringify(payload));
@@ -475,7 +505,7 @@ export function InvoiceDetailPageClient({
   });
 
   function onDiscard() {
-    reset(toFormValues(initial));
+    reset(toFormValues(initial, issuerNip));
   }
 
   return (

@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/accordion";
 import {
   buildKsefLiteInvoiceInput,
+  podmiot2CounterpartyFromParsed,
   type BuildFa3XmlOptions,
 } from "@/lib/invoice/xml-builder";
 import type { ParsedInvoice } from "@/lib/validations/invoice";
@@ -59,6 +60,7 @@ export function KsefPayloadPreview({
   issuer: BuildFa3XmlOptions;
 }) {
   const input = buildKsefLiteInvoiceInput(data, issuer);
+  const podmiot2Src = podmiot2CounterpartyFromParsed(data, issuer.issuerNip);
   const pay = input.details.payment;
   const addInfo = input.details.additionalInfo;
 
@@ -73,9 +75,11 @@ export function KsefPayloadPreview({
             Wartości wysyłane do generatora FA(3).{" "}
             <strong className="text-foreground">Sprzedawca (Podmiot1)</strong> —
             z profilu (NIP = kontekst KSeF).{" "}
-            <strong className="text-foreground">Nabywca (Podmiot2)</strong> — z{" "}
-            <span className="font-mono">parsedInvoice.seller</span> (sprzedawca
-            na PDF / pierwszy NIP), nie z drugiego bloku NIP.
+            <strong className="text-foreground">Nabywca (Podmiot2)</strong> —{" "}
+            kontrahent (druga strona): jeśli NIP z profilu = sprzedawca na PDF, do
+            KSeF idzie nabywca z PDF; jeśli NIP = nabywca na PDF — sprzedawca z
+            PDF. Przy braku dopasowania używany jest jak dawniej{" "}
+            <span className="font-mono">parsedInvoice.seller</span>.
           </p>
           <div className="space-y-6 text-sm">
         <p className="text-muted-foreground border-border/60 bg-muted/40 rounded-md border p-3 text-xs leading-relaxed">
@@ -113,19 +117,19 @@ export function KsefPayloadPreview({
           <h3 className="mb-1 font-semibold">Nabywca (Podmiot2)</h3>
           <PayloadRow
             pl="NIP"
-            path="buyer.nip ← parsedInvoice.seller.nip"
+            path="buyer.nip ← kontrahent (druga strona z PDF)"
             xml="Podmiot2 / DaneIdentyfikacyjne / NIP"
             value={input.buyer.nip}
           />
           <PayloadRow
             pl="Nazwa (tylko informacja z PDF — nie w payloadzie)"
-            path="parsedInvoice.seller.name"
+            path="kontrahent (parsed.seller lub parsed.buyer wg NIP)"
             xml="— (KSeF weryfikuje NIP; ksef-lite+NIP+Nazwa w DaneIdentyfikacyjne bywa odrzucone)"
-            value={data.seller.name}
+            value={podmiot2Src.name}
           />
           <PayloadRow
             pl="Adres (łączony)"
-            path="buyer.address ← parsedInvoice.seller"
+            path="buyer.address ← adres kontrahenta z PDF"
             xml="Podmiot2 / Adres (KodKraju, AdresL1, AdresL2)"
             value={input.buyer.address}
           />

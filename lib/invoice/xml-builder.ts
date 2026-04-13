@@ -34,6 +34,60 @@ function issuerAddressForKsef(o: BuildFa3XmlOptions): string {
   );
 }
 
+function normalizeNip(n: string): string {
+  return n.replace(/\D/g, "").slice(0, 10);
+}
+
+/**
+ * Party on the PDF whose NIP matches the profile (Podmiot1 / Ty w KSeF).
+ */
+export function issuerPartyFromParsed(
+  data: ParsedInvoice,
+  issuerNip: string,
+): "seller" | "buyer" | null {
+  const p = normalizeNip(issuerNip);
+  if (p.length !== 10) return null;
+  if (p === normalizeNip(data.seller.nip)) return "seller";
+  if (p === normalizeNip(data.buyer.nip)) return "buyer";
+  return null;
+}
+
+/**
+ * Druga strona faktury (kontrahent w XML = Podmiot2 / `buyer` w ksef-lite).
+ * Zależy od tego, czy Twój NIP z profilu jest u sprzedawcy czy u nabywcy na PDF.
+ */
+export function podmiot2CounterpartyFromParsed(
+  data: ParsedInvoice,
+  issuerNip: string,
+): { nip: string; name: string; addressLines: string[] } {
+  const side = issuerPartyFromParsed(data, issuerNip);
+  if (side === "seller") {
+    return {
+      nip: data.buyer.nip,
+      name: data.buyer.name,
+      addressLines: data.buyer.addressLines,
+    };
+  }
+  if (side === "buyer") {
+    return {
+      nip: data.seller.nip,
+      name: data.seller.name,
+      addressLines: data.seller.addressLines,
+    };
+  }
+  console.warn("[KSeF XML] NIP profilu nie zgadza się ze sprzedawcą ani nabywcą z PDF — Podmiot2 jak dawniej (parsed.seller)", {
+    scope: "invoice.xml",
+    issuerNip,
+    sellerNip: data.seller.nip,
+    buyerNip: data.buyer.nip,
+  });
+  return {
+    nip: data.seller.nip,
+    name: data.seller.name,
+    addressLines: data.seller.addressLines,
+  };
+}
+
 /** ksef-lite FA(3) JSON input — same object passed to `KSefInvoiceGenerator.generate`. */
 export function buildKsefLiteInvoiceInput(
   data: ParsedInvoice,
@@ -41,6 +95,7 @@ export function buildKsefLiteInvoiceInput(
 ) {
   const issueDate = new Date(data.issueDate);
   const saleDate = new Date(data.saleDate);
+  const podmiot2 = podmiot2CounterpartyFromParsed(data, options.issuerNip);
 
   return {
     seller: {
@@ -49,12 +104,11 @@ export function buildKsefLiteInvoiceInput(
       address: issuerAddressForKsef(options),
     },
     buyer: {
-      // Podmiot2 = counterparty on the document: PDF issuer (first NIP / parsed.seller),
-      // not parsed.buyer (your company on the PDF when you receive the invoice).
-      nip: data.seller.nip,
+      // Podmiot2 = kontrahent (druga strona), nie Twój NIP z profilu.
+      nip: podmiot2.nip,
       // Empty: ksef-lite+NIP+Nazwa in DaneIdentyfikacyjne is often rejected by KSeF.
       name: "",
-      address: joinAddress(data.seller.addressLines),
+      address: joinAddress(podmiot2.addressLines),
     },
     details: {
       invoiceNumber: data.invoiceNumber,

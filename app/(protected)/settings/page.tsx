@@ -47,14 +47,6 @@ export default async function SettingsPage() {
     : emptyProfile;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Ustawienia</h1>
-        <p className="text-muted-foreground text-sm">
-          Dane są sprawdzane na serwerze (Zod) przy każdym zapisie.
-        </p>
-      </div>
       <SettingsForm defaultValues={defaults} />
-    </div>
   );
 }
