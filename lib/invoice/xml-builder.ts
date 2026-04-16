@@ -106,8 +106,7 @@ export function buildKsefLiteInvoiceInput(
     buyer: {
       // Podmiot2 = kontrahent (druga strona), nie Twój NIP z profilu.
       nip: podmiot2.nip,
-      // Empty: ksef-lite+NIP+Nazwa in DaneIdentyfikacyjne is often rejected by KSeF.
-      name: "",
+      name: podmiot2.name,
       address: joinAddress(podmiot2.addressLines),
     },
     details: {
