@@ -70,6 +70,7 @@ const invoiceEditFormSchema = z.object({
   invoiceNumber: z.string().min(1, "Wymagany numer"),
   issueDate: z.string().min(1, "Wymagana data"),
   saleDate: z.string().min(1, "Wymagana data"),
+  remarks: z.string(),
   lineItems: z.array(lineDraftSchema).min(1, "Co najmniej jedna pozycja"),
 });
 
@@ -98,6 +99,7 @@ function toFormValues(
     invoiceNumber: p.invoiceNumber,
     issueDate: p.issueDate,
     saleDate: p.saleDate,
+    remarks: p.remarks ?? "GAP_",
     lineItems: toLineDrafts(p.lineItems),
   };
 }
@@ -162,6 +164,7 @@ function buildPayload(
       invoiceNumber: values.invoiceNumber.trim() || base.invoiceNumber,
       issueDate: values.issueDate.trim() || base.issueDate,
       saleDate: values.saleDate.trim() || base.saleDate,
+      remarks: values.remarks.trim() || undefined,
       lineItems,
       vatSummary: base.vatSummary,
       totals: base.totals,
@@ -174,6 +177,7 @@ function buildPayload(
     invoiceNumber: values.invoiceNumber.trim() || base.invoiceNumber,
     issueDate: values.issueDate.trim() || base.issueDate,
     saleDate: values.saleDate.trim() || base.saleDate,
+    remarks: values.remarks.trim() || undefined,
     lineItems,
     vatSummary: base.vatSummary,
     totals: base.totals,
@@ -208,12 +212,6 @@ function InvoiceFormSections({
     () => podmiot2CounterpartyFromParsed(preview, issuerNipForPreview),
     [preview, issuerNipForPreview],
   );
-  const issuerPartyOnPdf = useMemo(() => {
-    const side = issuerPartyFromParsed(preview, issuerNipForPreview);
-    if (side === "buyer") return preview.buyer;
-    if (side === "seller") return preview.seller;
-    return preview.seller;
-  }, [preview, issuerNipForPreview]);
 
   return (
     <>
@@ -427,6 +425,25 @@ function InvoiceFormSections({
           <p className="font-medium">
             Brutto: {preview.totals.gross.toFixed(2)} PLN
           </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Dodatkowy opis</CardTitle>
+          <CardDescription>
+            Treść trafia do KSeF jako DodatkowyOpis (klucz „Uwagi&quot;). Pole
+            opcjonalne — zostaw puste, jeśli nie potrzebujesz.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Textarea
+            {...register("remarks")}
+            aria-label="Dodatkowy opis (DodatkowyOpis w KSeF)"
+            rows={4}
+            placeholder="np. numer zamówienia, uwagi do faktury…"
+            className="text-sm"
+          />
         </CardContent>
       </Card>
     </>
