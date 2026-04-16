@@ -2,6 +2,7 @@ import { KSefInvoiceGenerator } from "ksef-lite";
 import type { ParsedInvoice } from "@/lib/validations/invoice";
 import type { ProfileRow } from "@/lib/validations/profile";
 import { profileReadyForKsefXml } from "@/lib/validations/profile";
+import { mergeLeadingNameLinesFromAddress } from "@/lib/invoice/party-name-address";
 
 function joinAddress(lines: string[]): string {
   return lines.filter(Boolean).join(", ") || "—";
@@ -62,18 +63,18 @@ export function podmiot2CounterpartyFromParsed(
 ): { nip: string; name: string; addressLines: string[] } {
   const side = issuerPartyFromParsed(data, issuerNip);
   if (side === "seller") {
-    return {
+    return mergeLeadingNameLinesFromAddress({
       nip: data.buyer.nip,
       name: data.buyer.name,
       addressLines: data.buyer.addressLines,
-    };
+    });
   }
   if (side === "buyer") {
-    return {
+    return mergeLeadingNameLinesFromAddress({
       nip: data.seller.nip,
       name: data.seller.name,
       addressLines: data.seller.addressLines,
-    };
+    });
   }
   console.warn("[KSeF XML] NIP profilu nie zgadza się ze sprzedawcą ani nabywcą z PDF — Podmiot2 jak dawniej (parsed.seller)", {
     scope: "invoice.xml",
@@ -81,11 +82,11 @@ export function podmiot2CounterpartyFromParsed(
     sellerNip: data.seller.nip,
     buyerNip: data.buyer.nip,
   });
-  return {
+  return mergeLeadingNameLinesFromAddress({
     nip: data.seller.nip,
     name: data.seller.name,
     addressLines: data.seller.addressLines,
-  };
+  });
 }
 
 /** ksef-lite FA(3) JSON input — same object passed to `KSefInvoiceGenerator.generate`. */

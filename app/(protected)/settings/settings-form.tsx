@@ -47,6 +47,7 @@ export function SettingsForm({ defaultValues }: Props) {
     resolver: zodResolver(profileFormSchema),
     defaultValues,
   });
+  // eslint-disable-next-line react-hooks/incompatible-library
   const activeKsefEnv = form.watch("ksef_environment");
   const toastShown = useRef(false);
 

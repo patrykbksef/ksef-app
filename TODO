@@ -15,10 +15,11 @@ DONE:
 
    TODO:
 
-8. PASSWORD POLICY dla nowych kont
-9. remove updating invoices to the DB - display invoices from KSEF, add tanstack query
-10. change password option
-11. hide for now option for creating accounts
+8. PRZYCISKI ZAPISZ I WYŚLIJ POD FORMULARZEM
+9. PASSWORD POLICY dla nowych kont
+10. remove updating invoices to the DB - display invoices from KSEF, add tanstack query
+11. change password option
+12. hide for now option for creating accounts
 
 PROMOWANIE:
 Facebook: "Biura rachunkowe"

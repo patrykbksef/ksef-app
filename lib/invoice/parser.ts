@@ -1,4 +1,5 @@
 import { parsedInvoiceSchema, type ParsedInvoice } from "@/lib/validations/invoice";
+import { mergeLeadingNameLinesFromAddress } from "@/lib/invoice/party-name-address";
 
 const LOG_SCOPE = "invoice.parser";
 
@@ -261,6 +262,14 @@ export function parseInterRiskInvoiceText(rawText: string): ParsedInvoice {
       : [];
   const sellerLines = normalizeInterRiskPartyLines(sellerLinesRaw);
   const buyerLines = normalizeInterRiskPartyLines(buyerLinesRaw);
+  const sellerParty = mergeLeadingNameLinesFromAddress({
+    name: sellerLines[0] ?? "",
+    addressLines: sellerLines.slice(1),
+  });
+  const buyerParty = mergeLeadingNameLinesFromAddress({
+    name: buyerLines[0] ?? "",
+    addressLines: buyerLines.slice(1),
+  });
 
   const itemsStart = lines.findIndex((l) =>
     l.includes("Nazwa usługi") || l.includes("Nazwa us"),
@@ -353,13 +362,13 @@ export function parseInterRiskInvoiceText(rawText: string): ParsedInvoice {
     issueDate,
     saleDate,
     seller: {
-      name: sellerLines[0] ?? "Nieznany sprzedawca",
-      addressLines: sellerLines.slice(1),
+      name: sellerParty.name || "Nieznany sprzedawca",
+      addressLines: sellerParty.addressLines,
       nip: sellerNip,
     },
     buyer: {
-      name: buyerLines[0] ?? "Nieznany nabywca",
-      addressLines: buyerLines.slice(1),
+      name: buyerParty.name || "Nieznany nabywca",
+      addressLines: buyerParty.addressLines,
       nip: buyerNip,
     },
     ...bank,
