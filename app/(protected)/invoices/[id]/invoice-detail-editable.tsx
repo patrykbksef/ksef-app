@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { recalcParsedInvoice } from "@/lib/invoice/recalc-parsed-invoice";
+import type { KsefEnvironment } from "@/lib/ksef/config";
 import {
   issuerPartyFromParsed,
   podmiot2CounterpartyFromParsed,
@@ -460,6 +461,7 @@ export function InvoiceDetailPageClient({
   issuerOptions,
   parsedSnapshot,
   canSendToKsef,
+  ksefEnvironment,
 }: {
   invoiceId: string;
   fileName: string;
@@ -470,6 +472,7 @@ export function InvoiceDetailPageClient({
   issuerOptions: BuildFa3XmlOptions | null;
   parsedSnapshot: string;
   canSendToKsef: boolean;
+  ksefEnvironment: KsefEnvironment;
 }) {
   const router = useRouter();
   const [saveState, saveAction] = useActionState(
@@ -557,6 +560,7 @@ export function InvoiceDetailPageClient({
             canSend={canSendToKsef}
             sendDisabled={isDirty}
             sendDisabledReason="Zapisz lub anuluj zmiany przed wysłaniem do KSeF"
+            ksefEnvironment={ksefEnvironment}
           />
         </div>
       </div>

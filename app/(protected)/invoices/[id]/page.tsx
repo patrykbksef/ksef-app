@@ -12,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
+import { resolveKsefEnvironment } from "@/lib/ksef/config";
 import { buildFa3XmlOptionsFromProfile } from "@/lib/invoice/xml-builder";
 import { invoiceDbSchema, parsedInvoiceSchema } from "@/lib/validations/invoice";
 import {
@@ -58,6 +59,9 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
     profileParsed?.success && profileReadyForKsefXml(profileParsed.data)
       ? buildFa3XmlOptionsFromProfile(profileParsed.data)
       : null;
+  const ksefEnvironment = profileParsed?.success
+    ? resolveKsefEnvironment(profileParsed.data.ksef_environment)
+    : "demo";
 
   const parsed = inv.data.parsed_data
     ? parsedInvoiceSchema.safeParse(inv.data.parsed_data)
@@ -97,6 +101,7 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
             issuerOptions={issuerOptions}
             parsedSnapshot={JSON.stringify(data)}
             canSendToKsef={canSend}
+            ksefEnvironment={ksefEnvironment}
           />
 
           {issuerOptions ? (

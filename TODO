@@ -13,13 +13,15 @@ DONE:
 6. HIDE not needed informations(Dane przekazywane do ksef) section, make it accordion
 7. add ai + switch between native and AI functionalities(for Marcin for testing)
 
+8. NA ŚRODOWISKU PRODUKCYJNYM, PISZE ŻE JESTEŚ NA TESTOWYM
+
    TODO:
 
-8. PRZYCISKI ZAPISZ I WYŚLIJ POD FORMULARZEM
-9. PASSWORD POLICY dla nowych kont
-10. remove updating invoices to the DB - display invoices from KSEF, add tanstack query
-11. change password option
-12. hide for now option for creating accounts
+9. PRZYCISKI ZAPISZ I WYŚLIJ POD FORMULARZEM
+10. PASSWORD POLICY dla nowych kont
+11. remove updating invoices to the DB - display invoices from KSEF, add tanstack query
+12. change password option
+13. hide for now option for creating accounts
 
 PROMOWANIE:
 Facebook: "Biura rachunkowe"

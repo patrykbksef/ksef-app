@@ -11,15 +11,22 @@ import {
   sendInvoiceToKsef,
   type SendInvoiceState,
 } from "@/lib/actions/invoices";
+import type { KsefEnvironment } from "@/lib/ksef/config";
 
 function Submit({
   disabled,
   title,
+  ksefEnvironment,
 }: {
   disabled?: boolean;
   title?: string;
+  ksefEnvironment: KsefEnvironment;
 }) {
   const { pending } = useFormStatus();
+  const sendLabel =
+    ksefEnvironment === "demo"
+      ? "Wyślij do KSeF (test)"
+      : "Wyślij do KSeF";
   return (
     <Button
       type="submit"
@@ -27,7 +34,7 @@ function Submit({
       size="lg"
       title={title}
     >
-      {pending ? "Wysyłanie…" : "Wyślij do KSeF (test)"}
+      {pending ? "Wysyłanie…" : sendLabel}
     </Button>
   );
 }
@@ -39,11 +46,13 @@ export function SendToKsefForm({
   canSend,
   sendDisabled,
   sendDisabledReason,
+  ksefEnvironment,
 }: {
   invoiceId: string;
   canSend: boolean;
   sendDisabled?: boolean;
   sendDisabledReason?: string;
+  ksefEnvironment: KsefEnvironment;
 }) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -69,7 +78,11 @@ export function SendToKsefForm({
   return (
     <form action={formAction} className="flex flex-wrap items-center gap-3">
       <input type="hidden" name="invoice_id" value={invoiceId} />
-      <Submit disabled={sendDisabled} title={sendDisabledReason} />
+      <Submit
+        disabled={sendDisabled}
+        title={sendDisabledReason}
+        ksefEnvironment={ksefEnvironment}
+      />
     </form>
   );
 }

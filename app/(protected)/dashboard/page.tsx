@@ -58,7 +58,7 @@ export default async function DashboardPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Panel</h1>
         <p className="text-muted-foreground text-sm">
-          Wgraj fakturę PDF i wyślij ją do KSeF (środowisko testowe).
+          Wgraj fakturę PDF i wyślij ją do KSeF ({ profile?.data?.ksef_environment === "demo" ? "środowisko testowe" : "środowisko produkcyjne"}).
         </p>
       </div>
 
