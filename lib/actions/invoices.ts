@@ -105,7 +105,9 @@ export async function uploadInvoice(
 
   let parsedInvoice;
   try {
-    parsedInvoice = parseInterRiskInvoiceText(text);
+    parsedInvoice = parseInterRiskInvoiceText(text, {
+      issuerName: profile.issuer_name?.trim(),
+    });
   } catch (e) {
     const errorMessage = e instanceof Error ? e.message : String(e);
     console.error("Invoice upload: parse failed", {

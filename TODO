@@ -14,10 +14,10 @@ DONE:
 7. add ai + switch between native and AI functionalities(for Marcin for testing)
 
 8. NA ŚRODOWISKU PRODUKCYJNYM, PISZE ŻE JESTEŚ NA TESTOWYM
+9. po rejestracji przekierowanie na localhost
 
    TODO:
 
-9. po rejestracji przekierowanie na localhost
 10. w ustawieniach - mozliwosc dodania prefilled pól, jeśli empty
     (ten prefix dla pracownicy Marcina)
 11. PRZYCISKI ZAPISZ I WYŚLIJ POD FORMULARZEM

@@ -88,27 +88,200 @@ function parseInterRiskTableRow(
   };
 }
 
-function extractInvoiceNumber(text: string): string | null {
-  const m = text.match(/FAKTURA VAT NR\s+([^\r\n]+)/i);
-  return m?.[1]?.trim() ?? null;
+function normalizeInvoiceNumberToken(raw: string): string {
+  return raw
+    .trim()
+    .replace(/[,;.)]+$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function extractInvoiceNumber(text: string): string | null {
+  const patterns: RegExp[] = [
+    /FAKTURA\s+VAT\s+NR\s+([^\r\n]+)/i,
+    /Faktura\s+(?:VAT\s+)?nr\.?\s*:?\s*(\S+)/i,
+    /Numer\s+faktury\s*:?\s*(\S+)/i,
+    /Nr\.?\s+faktury\s*:?\s*(\S+)/i,
+    /Invoice\s+(?:No\.?|#)\s*:?\s*(\S+)/i,
+  ];
+  for (const re of patterns) {
+    const m = text.match(re);
+    const cap = m?.[1];
+    if (!cap) continue;
+    const n = normalizeInvoiceNumberToken(cap);
+    if (n.length > 0) return n;
+  }
+  return null;
+}
+
+/** First NIP value after a label (no newlines — avoids swallowing dates on next lines). */
+function nipDigitsAfterLabel(tail: string): string | null {
+  const compact =
+    tail.match(/^(\d{10})\b/) ??
+    tail.match(/^(\d{3}-\d{3}-\d{2}-\d{3})\b/) ??
+    tail.match(/^(\d{3}\s+\d{3}\s+\d{2}\s+\d{3})\b/);
+  if (compact) {
+    const d = compact[1]!.replace(/\D/g, "");
+    return d.length === 10 ? d : null;
+  }
+  const spaced = tail.match(/^([\d][\d\s\-]{8,25}?)(?=\s*$|\s{2,}|\s[^\d\s\-]|\r|\n)/);
+  if (!spaced) return null;
+  const d = spaced[1]!.replace(/\D/g, "");
+  return d.length === 10 ? d : null;
 }
 
 function extractNips(text: string): string[] {
-  const matches = text.matchAll(
-    /\b(?:NIP|TAX\s+NUMBER):?\s*(\d{10})\b/gi,
-  );
-  return [...matches].map((m) => m[1]!);
+  const out: string[] = [];
+  const label = /(?:NIP|TAX\s+NUMBER):?\s*/gi;
+  let m: RegExpExecArray | null;
+  while ((m = label.exec(text)) !== null) {
+    const start = m.index + m[0].length;
+    const tail = text.slice(start, start + 48);
+    const d = nipDigitsAfterLabel(tail);
+    if (d && !out.includes(d)) out.push(d);
+  }
+  return out;
 }
 
-/** Match seller/buyer lines: `NIP 123…`, `NIP: 123…`, `TAX NUMBER: 123…`, `TAX NUMBER 123…`. */
+/** Match seller/buyer lines: `NIP 123…`, `NIP: 525-10-32-299`, dashed groups, etc. */
 function findNipLineIndex(lines: string[], nip: string): number {
-  const pattern = new RegExp(`(?:NIP|TAX\\s+NUMBER):?\\s*${nip}`);
-  return lines.findIndex((l) => pattern.test(l));
+  const want = nip.replace(/\D/g, "");
+  return lines.findIndex((l) => {
+    const label = /(?:NIP|TAX\s+NUMBER):?\s*/gi;
+    let mm: RegExpExecArray | null;
+    while ((mm = label.exec(l)) !== null) {
+      const start = mm.index + mm[0].length;
+      const tail = l.slice(start, start + 48);
+      const d = nipDigitsAfterLabel(tail);
+      if (d === want) return true;
+    }
+    return false;
+  });
 }
 
+/** ISO `yyyy-mm-dd` first (document order), then `dd-mm-yyyy` → ISO; deduped. */
 function extractPolishDates(text: string): string[] {
-  const matches = text.matchAll(/\b(\d{2})-(\d{2})-(\d{4})\b/g);
-  return [...matches].map((m) => `${m[3]}-${m[2]}-${m[1]}`);
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  const push = (iso: string) => {
+    if (!seen.has(iso)) {
+      seen.add(iso);
+      ordered.push(iso);
+    }
+  };
+  for (const m of text.matchAll(/\b(\d{4})-(\d{2})-(\d{2})\b/g)) {
+    push(`${m[1]}-${m[2]}-${m[3]}`);
+  }
+  for (const m of text.matchAll(/\b(\d{2})-(\d{2})-(\d{4})\b/g)) {
+    push(`${m[3]}-${m[2]}-${m[1]}`);
+  }
+  return ordered;
+}
+
+/** Prefer explicit PL invoice lines so payment due is not used as sale date. */
+function extractIssueAndSaleDates(text: string): {
+  issueDate: string;
+  saleDate: string;
+} {
+  const saleM = text.match(/Data\s+sprzedaży\s*:?\s*(\d{4}-\d{2}-\d{2})/i);
+  const issueM =
+    text.match(/dnia\s*:?\s*(\d{4}-\d{2}-\d{2})/i) ??
+    text.match(/Data\s+wystawienia\s*:?\s*(\d{4}-\d{2}-\d{2})/i);
+  const ordered = extractPolishDates(text);
+  const issueDate = issueM?.[1] ?? ordered[0] ?? "";
+  const saleDate = saleM?.[1] ?? issueM?.[1] ?? ordered[0] ?? "";
+  return { issueDate, saleDate };
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * When PDF text glues seller + buyer on one line, strip issuer from profile if it
+ * matches the line prefix (flexible whitespace between issuer words).
+ */
+function splitNameLineByIssuerPrefix(
+  nameLine: string,
+  issuerName: string,
+): { sellerName: string; buyerName: string } | null {
+  const issuer = issuerName.trim();
+  if (!issuer) return null;
+  const trimmed = nameLine.trim();
+  const parts = issuer.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return null;
+  const re = new RegExp(
+    `^\\s*${parts.map(escapeRegExp).join("\\s+")}\\s*`,
+    "i",
+  );
+  const m = trimmed.match(re);
+  if (!m) return null;
+  const buyerName = trimmed.slice(m[0].length).trim();
+  if (!buyerName) return null;
+  return { sellerName: issuer, buyerName };
+}
+
+/**
+ * Europ Assistance / two-column PDFs: same-line dual NIP, "Sprzedawca Nabywca" header.
+ */
+function splitEuropAssistanceTwoColumnParties(
+  block: string[],
+  issuerName?: string,
+): {
+  sellerLines: string[];
+  buyerLines: string[];
+} {
+  if (block.length === 0) {
+    return { sellerLines: [], buyerLines: [] };
+  }
+  const nameLine = block[0] ?? "";
+  let sellerName = nameLine.trim();
+  let buyerName = "";
+  const byIssuer = issuerName
+    ? splitNameLineByIssuerPrefix(nameLine, issuerName)
+    : null;
+  if (byIssuer) {
+    sellerName = byIssuer.sellerName;
+    buyerName = byIssuer.buyerName;
+  } else {
+    const ea = nameLine.match(/^(.+?)\s+(Europ\s+Assistance\b.+)$/i);
+    if (ea) {
+      sellerName = ea[1]!.trim();
+      buyerName = ea[2]!.trim();
+    }
+  }
+  const sellerRest: string[] = [];
+  const buyerRest: string[] = [];
+  if (sellerName) sellerRest.push(sellerName);
+  if (buyerName) buyerRest.push(buyerName);
+  for (let i = 1; i < block.length; i++) {
+    const line = block[i]!;
+    const ul = line.match(/^(.+?)\s+(ul\.\s.+)$/i);
+    if (ul) {
+      sellerRest.push(ul[1]!.trim());
+      buyerRest.push(ul[2]!.trim());
+      continue;
+    }
+    const pc = line.match(
+      /^(\d{2}-\d{3}\s+.+?)\s+(\d{2}-\d{3}\s+.+)$/,
+    );
+    if (pc) {
+      sellerRest.push(pc[1]!.trim());
+      buyerRest.push(pc[2]!.trim());
+      continue;
+    }
+    const sp = line.split(/\s{2,}/);
+    if (sp.length >= 2) {
+      sellerRest.push(sp[0]!.trim());
+      buyerRest.push(sp.slice(1).join(" ").trim());
+    } else if (line.trim()) {
+      sellerRest.push(line.trim());
+    }
+  }
+  return {
+    sellerLines: normalizeInterRiskPartyLines(sellerRest),
+    buyerLines: normalizeInterRiskPartyLines(buyerRest),
+  };
 }
 
 function parseLineItemLine(line: string, lineNumber: number) {
@@ -143,6 +316,73 @@ function parseLineItemLine(line: string, lineNumber: number) {
     unit,
     quantity: qty,
     netUnitPrice,
+    netAmount: netAmt,
+    vatRate,
+    vatAmount: vatAmt,
+    grossAmount: gross,
+  };
+}
+
+/**
+ * Europ Assistance–style rows: `… qty netUnit net vatRate vatAmt brutto`
+ * (no separate unit column; qty and net unit at end before VAT block).
+ */
+function parseEuropAssistanceTotalsRow(
+  line: string,
+  lineNumber: number,
+): {
+  lineNumber: number;
+  name: string;
+  unit: string;
+  quantity: number;
+  netUnitPrice: number;
+  netAmount: number;
+  vatRate: number;
+  vatAmount: number;
+  grossAmount: number;
+} | null {
+  const t = line.trim();
+  if (!t || /^Razem\s*:/i.test(t) || /^w\s+tym\s*:/i.test(t)) return null;
+  const parts = t.split(/\s+/).filter(Boolean);
+  if (parts.length < 7) return null;
+
+  const gross = parsePlNumber(parts[parts.length - 1]!);
+  const vatAmt = parsePlNumber(parts[parts.length - 2]!);
+  const vatRate = parsePlNumber(parts[parts.length - 3]!);
+  const netAmt = parsePlNumber(parts[parts.length - 4]!);
+  const netUnit = parsePlNumber(parts[parts.length - 5]!);
+  const qty = parsePlNumber(parts[parts.length - 6]!);
+  let name = parts.slice(0, parts.length - 6).join(" ");
+  name = name.replace(/^\d+\s+/, "").trim();
+
+  if (
+    !name ||
+    !Number.isFinite(gross) ||
+    !Number.isFinite(netAmt) ||
+    !Number.isFinite(vatAmt) ||
+    !Number.isFinite(vatRate) ||
+    !Number.isFinite(qty) ||
+    !Number.isFinite(netUnit) ||
+    qty <= 0 ||
+    vatRate < 0 ||
+    vatRate > 100
+  ) {
+    return null;
+  }
+
+  const unit =
+    qty === 1
+      ? "szt."
+      : /km|holow|kursy|dojazd|powrót|etoll|opłat/i.test(name)
+        ? "km."
+        : "szt.";
+
+  return {
+    lineNumber,
+    name,
+    unit,
+    quantity: qty,
+    netUnitPrice: netUnit,
     netAmount: netAmt,
     vatRate,
     vatAmount: vatAmt,
@@ -186,8 +426,12 @@ function parseVatSummaryAndTotals(text: string) {
 
 function extractPayment(text: string) {
   const days = text.match(/Termin\s+Płatnosci\s*\(dni\):\s*(\d+)/i);
-  const due = text.match(/Do\s+zapłaty:\s*([\d.,]+)\s*zł\./i);
-  const method = text.match(/Forma\s+płatności:\s*\n?\s*([^\n]+)/i);
+  const due =
+    text.match(/Do\s+zapłaty:\s*([\d.,]+)\s*zł\./i) ??
+    text.match(/Do\s+zapłaty:\s*([\d.,]+)\b/i);
+  const method =
+    text.match(/Forma\s+płatności:\s*\n?\s*([^\n]+)/i) ??
+    text.match(/Sposób\s+zapłaty:\s*([^\n]+)/i);
   return {
     paymentDays: days ? Number.parseInt(days[1]!, 10) : undefined,
     amountDue: due ? parsePlNumber(due[1]!) : undefined,
@@ -212,10 +456,19 @@ function extractBank(text: string, buyerNip: string) {
   return {};
 }
 
+export type ParseInterRiskInvoiceTextOptions = {
+  /** Profile issuer name — used to split glued "Sprzedawca | Nabywca" name lines. */
+  issuerName?: string;
+};
+
 /**
  * Parse plain text extracted from InterRisk-style PDF invoices.
  */
-export function parseInterRiskInvoiceText(rawText: string): ParsedInvoice {
+export function parseInterRiskInvoiceText(
+  rawText: string,
+  options?: ParseInterRiskInvoiceTextOptions,
+): ParsedInvoice {
+  const issuerName = options?.issuerName?.trim();
   const text = rawText.replace(/\u00a0/g, " ");
   const lineCount = text.split(/\r?\n/).length;
 
@@ -228,7 +481,9 @@ export function parseInterRiskInvoiceText(rawText: string): ParsedInvoice {
       lineCount,
       textPreview: truncatePreview(text),
     });
-    throw new Error("Nie znaleziono numeru faktury (FAKTURA VAT NR …)");
+    throw new Error(
+      "Nie znaleziono numeru faktury (np. „FAKTURA VAT NR …”, „Faktura nr …”)",
+    );
   }
 
   const nips = extractNips(text);
@@ -246,36 +501,74 @@ export function parseInterRiskInvoiceText(rawText: string): ParsedInvoice {
   const sellerNip = nips[0]!;
   const buyerNip = nips[1]!;
 
-  const dates = extractPolishDates(text);
-  const issueDate = dates[0] ?? "";
-  const saleDate = dates[1] ?? dates[0] ?? "";
+  const { issueDate, saleDate } = extractIssueAndSaleDates(text);
 
   const lines = text.split(/\r?\n/).map((l) => l.trim());
   const nipSellerIdx = findNipLineIndex(lines, sellerNip);
   const nipBuyerIdx = findNipLineIndex(lines, buyerNip);
 
-  const sellerLinesRaw =
+  const sprzedawcaHeaderIdx = lines.findIndex((l) =>
+    /Sprzedawca.*Nabywca/i.test(l),
+  );
+
+  let sellerLinesRaw =
     nipSellerIdx > 0 ? lines.slice(1, nipSellerIdx).filter(Boolean) : [];
-  const buyerLinesRaw =
+  let buyerLinesRaw =
     nipBuyerIdx > nipSellerIdx + 1
       ? lines.slice(nipSellerIdx + 1, nipBuyerIdx).filter(Boolean)
       : [];
+
+  const usedEuropPartySplit =
+    sprzedawcaHeaderIdx >= 0 &&
+    nipSellerIdx === nipBuyerIdx &&
+    nipSellerIdx > sprzedawcaHeaderIdx;
+
+  if (usedEuropPartySplit) {
+    const block = lines
+      .slice(sprzedawcaHeaderIdx + 1, nipSellerIdx)
+      .filter(Boolean);
+    const split = splitEuropAssistanceTwoColumnParties(
+      block,
+      issuerName || undefined,
+    );
+    sellerLinesRaw = split.sellerLines;
+    buyerLinesRaw = split.buyerLines;
+  }
+
   const sellerLines = normalizeInterRiskPartyLines(sellerLinesRaw);
   const buyerLines = normalizeInterRiskPartyLines(buyerLinesRaw);
-  const sellerParty = mergeLeadingNameLinesFromAddress({
-    name: sellerLines[0] ?? "",
-    addressLines: sellerLines.slice(1),
-  });
-  const buyerParty = mergeLeadingNameLinesFromAddress({
-    name: buyerLines[0] ?? "",
-    addressLines: buyerLines.slice(1),
-  });
+  const sellerParty = usedEuropPartySplit
+    ? {
+        name: sellerLines[0] ?? "",
+        addressLines: sellerLines.slice(1).filter(Boolean),
+      }
+    : mergeLeadingNameLinesFromAddress({
+        name: sellerLines[0] ?? "",
+        addressLines: sellerLines.slice(1),
+      });
+  const buyerParty = usedEuropPartySplit
+    ? {
+        name: buyerLines[0] ?? "",
+        addressLines: buyerLines.slice(1).filter(Boolean),
+      }
+    : mergeLeadingNameLinesFromAddress({
+        name: buyerLines[0] ?? "",
+        addressLines: buyerLines.slice(1),
+      });
 
-  const itemsStart = lines.findIndex((l) =>
-    l.includes("Nazwa usługi") || l.includes("Nazwa us"),
+  const itemsStart = lines.findIndex(
+    (l) =>
+      l.includes("Nazwa usługi") ||
+      l.includes("Nazwa us") ||
+      /Nazwa\s+towaru/i.test(l) ||
+      /L\.p\.\s+Nazwa/i.test(l),
   );
   let itemsEnd = lines.findIndex(
-    (l, i) => i > itemsStart && /^\d+(?:[.,]\d+)?%\s/.test(l),
+    (l, i) =>
+      i > itemsStart &&
+      (/^\d+(?:[.,]\d+)?%\s/.test(l) ||
+        /^Razem\s*:/i.test(l) ||
+        /^w\s+tym\s*:/i.test(l)),
   );
   if (itemsStart < 0) {
     console.error("Invoice parse failed: line items section not found", {
@@ -289,10 +582,24 @@ export function parseInterRiskInvoiceText(rawText: string): ParsedInvoice {
   }
   if (itemsEnd < 0) itemsEnd = lines.length;
 
+  let dataStart = itemsStart + 1;
+  const itemsHeaderLine = lines[itemsStart] ?? "";
+  if (/L\.p\.\s+Nazwa/i.test(itemsHeaderLine)) {
+    while (
+      dataStart < lines.length &&
+      dataStart < (itemsEnd > 0 ? itemsEnd : lines.length)
+    ) {
+      const l = lines[dataStart]!;
+      if (/^\d+\s+\D/u.test(l)) break;
+      if (/^Razem\s*:/i.test(l)) break;
+      dataStart++;
+    }
+  }
+
   const lineItems: NonNullable<ReturnType<typeof parseLineItemLine>>[] = [];
   let lp = 0;
   let pendingNamePrefix = "";
-  for (let i = itemsStart + 1; i < itemsEnd; i++) {
+  for (let i = dataStart; i < itemsEnd; i++) {
     const row = lines[i]!;
     if (!row || row.startsWith("SPRZEDAWCA")) {
       pendingNamePrefix = "";
@@ -301,6 +608,7 @@ export function parseInterRiskInvoiceText(rawText: string): ParsedInvoice {
     const fullRow = pendingNamePrefix ? `${pendingNamePrefix} ${row}` : row;
     const item =
       parseInterRiskTableRow(fullRow, lp + 1) ??
+      parseEuropAssistanceTotalsRow(fullRow, lp + 1) ??
       parseLineItemLine(normalizeFusedPriceQtyRow(fullRow), lp + 1) ??
       parseLineItemLine(fullRow, lp + 1);
     if (item) {

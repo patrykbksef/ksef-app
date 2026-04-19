@@ -3,57 +3,107 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildFa3XmlFromParsedInvoice } from "../lib/invoice/xml-builder";
 import { extractTextFromPdfBuffer } from "../lib/invoice/pdf-text";
-import { parseInterRiskInvoiceText } from "../lib/invoice/parser";
+import {
+  extractInvoiceNumber,
+  parseInterRiskInvoiceText,
+} from "../lib/invoice/parser";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pdfPath = path.join(__dirname, "..", "invoice-example.pdf");
+
+function assertInvoiceNumberSnippets() {
+  const a = extractInvoiceNumber("FAKTURA VAT NR 12/ABC/2024\nfoo");
+  if (a !== "12/ABC/2024") {
+    console.error("extractInvoiceNumber FAKTURA VAT NR:", a);
+    process.exit(1);
+  }
+  const b = extractInvoiceNumber("Faktura nr 138/2026\nSprzedawca");
+  if (b !== "138/2026") {
+    console.error("extractInvoiceNumber Faktura nr:", b);
+    process.exit(1);
+  }
+  console.log("OK extractInvoiceNumber snippets");
+}
+
 async function main() {
-  const buf = fs.readFileSync(pdfPath);
-  const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
-  const text = await extractTextFromPdfBuffer(ab as ArrayBuffer);
-  const parsed = parseInterRiskInvoiceText(text);
-  console.log("lineItemCount:", parsed.lineItems.length);
-  if (parsed.lineItems.length !== 8) {
-    process.exit(1);
+  assertInvoiceNumberSnippets();
+
+  if (fs.existsSync(pdfPath)) {
+    const buf = fs.readFileSync(pdfPath);
+    const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+    const text = await extractTextFromPdfBuffer(ab as ArrayBuffer);
+    const parsed = parseInterRiskInvoiceText(text);
+    console.log("lineItemCount:", parsed.lineItems.length);
+    if (parsed.lineItems.length !== 8) {
+      process.exit(1);
+    }
+
+    const fakeIssuer = {
+      issuerNip: "9552540785",
+      issuerName: "Test Issuer Sp. z o.o.",
+      issuerAddressLine1: "ul. Przykładowa 1",
+      issuerAddressLine2: "00-001 Warszawa",
+    };
+    const xml = buildFa3XmlFromParsedInvoice(parsed, fakeIssuer);
+    const podmiot1Nip = xml.match(
+      /<Podmiot1>[\s\S]*?<NIP>(\d{10})<\/NIP>/,
+    )?.[1];
+    if (podmiot1Nip !== fakeIssuer.issuerNip) {
+      console.error("Podmiot1 NIP expected profile-style issuer, got:", podmiot1Nip);
+      process.exit(1);
+    }
+    if (podmiot1Nip === parsed.seller.nip) {
+      console.error("Podmiot1 must not use PDF seller NIP");
+      process.exit(1);
+    }
+    console.log("FA(3) Podmiot1 NIP matches issuer options (not PDF seller).");
+
+    const podmiot2Nip = xml.match(
+      /<Podmiot2>[\s\S]*?<NIP>(\d{10})<\/NIP>/,
+    )?.[1];
+    if (podmiot2Nip !== parsed.seller.nip) {
+      console.error(
+        "Podmiot2 NIP expected parsed.seller.nip (PDF issuer), got:",
+        podmiot2Nip,
+        "expected:",
+        parsed.seller.nip,
+      );
+      process.exit(1);
+    }
+    if (podmiot2Nip === parsed.buyer.nip) {
+      console.error("Podmiot2 must not use PDF buyer (second NIP block) NIP");
+      process.exit(1);
+    }
+    console.log("FA(3) Podmiot2 NIP matches PDF seller (first NIP block).");
+  } else {
+    console.log("Skip invoice-example.pdf (file not present)");
   }
 
-  const fakeIssuer = {
-    issuerNip: "9552540785",
-    issuerName: "Test Issuer Sp. z o.o.",
-    issuerAddressLine1: "ul. Przykładowa 1",
-    issuerAddressLine2: "00-001 Warszawa",
-  };
-  const xml = buildFa3XmlFromParsedInvoice(parsed, fakeIssuer);
-  const podmiot1Nip = xml.match(
-    /<Podmiot1>[\s\S]*?<NIP>(\d{10})<\/NIP>/,
-  )?.[1];
-  if (podmiot1Nip !== fakeIssuer.issuerNip) {
-    console.error("Podmiot1 NIP expected profile-style issuer, got:", podmiot1Nip);
-    process.exit(1);
+  const europPath = path.join(__dirname, "..", "examples", "1.pdf");
+  if (fs.existsSync(europPath)) {
+    const eb = fs.readFileSync(europPath);
+    const eab = eb.buffer.slice(eb.byteOffset, eb.byteOffset + eb.byteLength);
+    const etext = await extractTextFromPdfBuffer(eab as ArrayBuffer);
+    const europ = parseInterRiskInvoiceText(etext, {
+      issuerName: "MAR-SAT Szmuc Marcin",
+    });
+    if (europ.invoiceNumber !== "138/2026" || europ.lineItems.length !== 3) {
+      console.error("Europ Assistance PDF parse:", {
+        invoiceNumber: europ.invoiceNumber,
+        lineItems: europ.lineItems.length,
+      });
+      process.exit(1);
+    }
+    if (europ.seller.name !== "MAR-SAT Szmuc Marcin") {
+      console.error("Europ PDF seller.name expected profile issuer, got:", europ.seller.name);
+      process.exit(1);
+    }
+    if (!europ.buyer.name.toLowerCase().includes("europ assistance")) {
+      console.error("Europ PDF buyer.name expected Europ Assistance…, got:", europ.buyer.name);
+      process.exit(1);
+    }
+    console.log("OK examples/1.pdf (Europ Assistance) lineItems:", europ.lineItems.length);
   }
-  if (podmiot1Nip === parsed.seller.nip) {
-    console.error("Podmiot1 must not use PDF seller NIP");
-    process.exit(1);
-  }
-  console.log("FA(3) Podmiot1 NIP matches issuer options (not PDF seller).");
-
-  const podmiot2Nip = xml.match(
-    /<Podmiot2>[\s\S]*?<NIP>(\d{10})<\/NIP>/,
-  )?.[1];
-  if (podmiot2Nip !== parsed.seller.nip) {
-    console.error(
-      "Podmiot2 NIP expected parsed.seller.nip (PDF issuer), got:",
-      podmiot2Nip,
-      "expected:",
-      parsed.seller.nip,
-    );
-    process.exit(1);
-  }
-  if (podmiot2Nip === parsed.buyer.nip) {
-    console.error("Podmiot2 must not use PDF buyer (second NIP block) NIP");
-    process.exit(1);
-  }
-  console.log("FA(3) Podmiot2 NIP matches PDF seller (first NIP block).");
 
   const extraPdfs = [
     path.join(__dirname, "..", "invoice-example2.pdf"),
