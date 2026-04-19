@@ -2,7 +2,14 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
-import { useActionState, useEffect, useMemo, useRef, useTransition } from "react";
+import {
+  useActionState,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import {
   FormProvider,
   useFieldArray,
@@ -29,6 +36,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { recalcParsedInvoice } from "@/lib/invoice/recalc-parsed-invoice";
 import type { KsefEnvironment } from "@/lib/ksef/config";
@@ -77,6 +85,21 @@ const invoiceEditFormSchema = z.object({
 
 export type InvoiceEditFormValues = z.infer<typeof invoiceEditFormSchema>;
 
+const REMARKS_AUTO_PREFIX_LS_KEY = "ksef-invoice-remarks-auto-prefix";
+const REMARKS_PREFIX_TEXT_LS_KEY = "ksef-invoice-remarks-prefix-text";
+
+/** `null` w localStorage = brak zapisu */
+function readRemarksPrefixTextFromStorage(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const raw = localStorage.getItem(REMARKS_PREFIX_TEXT_LS_KEY);
+    if (raw === null) return "";
+    return raw;
+  } catch {
+    return "";
+  }
+}
+
 function toLineDrafts(items: InvoiceLineItem[]): LineDraft[] {
   return items.map((line) => ({
     lineNumber: line.lineNumber,
@@ -100,9 +123,24 @@ function toFormValues(
     invoiceNumber: p.invoiceNumber,
     issueDate: p.issueDate,
     saleDate: p.saleDate,
-    remarks: p.remarks ?? "GAP_",
+    remarks: p.remarks ?? "",
     lineItems: toLineDrafts(p.lineItems),
   };
+}
+
+function formValuesWithOptionalRemarksPrefix(
+  p: ParsedInvoice,
+  issuerNip: string,
+): InvoiceEditFormValues {
+  const v = toFormValues(p, issuerNip);
+  if (
+    typeof window !== "undefined" &&
+    localStorage.getItem(REMARKS_AUTO_PREFIX_LS_KEY) === "true" &&
+    !p.remarks?.trim()
+  ) {
+    return { ...v, remarks: readRemarksPrefixTextFromStorage() };
+  }
+  return v;
 }
 
 function parseDraftLines(
@@ -190,12 +228,55 @@ const saveInitial: SaveParsedInvoiceState = {};
 function InvoiceFormSections({
   initial,
   issuerOptions,
+  parsedSnapshotKey,
 }: {
   initial: ParsedInvoice;
   issuerOptions: BuildFa3XmlOptions | null;
+  parsedSnapshotKey: string;
 }) {
-  const { control, register } = useFormContext<InvoiceEditFormValues>();
+  const { control, register, setValue, getValues } =
+    useFormContext<InvoiceEditFormValues>();
   const { fields } = useFieldArray({ control, name: "lineItems" });
+
+  const [autoPrefixGap, setAutoPrefixGap] = useState(false);
+  const [remarksPrefixText, setRemarksPrefixText] = useState("");
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setAutoPrefixGap(
+        localStorage.getItem(REMARKS_AUTO_PREFIX_LS_KEY) === "true",
+      );
+      setRemarksPrefixText(readRemarksPrefixTextFromStorage());
+    });
+  }, [parsedSnapshotKey]);
+
+  function onRemarksPrefixFieldChange(next: string) {
+    setRemarksPrefixText(next);
+    try {
+      localStorage.setItem(REMARKS_PREFIX_TEXT_LS_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function onRemarksAutoPrefixChange(checked: boolean) {
+    setAutoPrefixGap(checked);
+    try {
+      localStorage.setItem(
+        REMARKS_AUTO_PREFIX_LS_KEY,
+        checked ? "true" : "false",
+      );
+    } catch {
+      /* ignore quota / private mode */
+    }
+    const prefix = readRemarksPrefixTextFromStorage();
+    const r = (getValues("remarks") ?? "").trim();
+    if (checked) {
+      if (r === "") setValue("remarks", prefix, { shouldDirty: true });
+    } else if (r === prefix.trim()) {
+      setValue("remarks", "", { shouldDirty: true });
+    }
+  }
 
   const watched = useWatch({ control }) as InvoiceEditFormValues | undefined;
   const issuerNipForPreview = issuerOptions?.issuerNip ?? "";
@@ -434,10 +515,38 @@ function InvoiceFormSections({
           <CardTitle>Dodatkowy opis</CardTitle>
           <CardDescription>
             Treść trafia do KSeF jako DodatkowyOpis (klucz „Uwagi&quot;). Pole
-            opcjonalne — zostaw puste, jeśli nie potrzebujesz.
+            opcjonalne — zostaw puste, jeśli nie potrzebujesz. Możesz włączyć
+            automatyczne wstawianie wybranego prefiksu, gdy pole jest puste;
+            prefiks i opcja są zapamiętywane w tej przeglądarce.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Checkbox
+              checked={autoPrefixGap}
+              onCheckedChange={onRemarksAutoPrefixChange}
+              aria-label="Wstaw domyślny prefiks do dodatkowego opisu, gdy pole jest puste"
+            />
+            <span className="text-muted-foreground text-sm">
+              Wstaw domyślny prefiks (gdy pole jest puste)
+            </span>
+          </div>
+          <div className="space-y-1 gap-2 flex flex-wrap items-center">
+            <label
+              htmlFor="remarks-prefix-text"
+              className="text-muted-foreground text-sm font-medium"
+            >
+              Tekst prefiksu
+            </label>
+            <Input
+              id="remarks-prefix-text"
+              value={remarksPrefixText}
+              onChange={(e) => onRemarksPrefixFieldChange(e.target.value)}
+              maxLength={120}
+              className="max-w-md font-mono text-sm"
+              aria-label="Tekst prefiksu dodatkowego opisu"
+            />
+          </div>
           <Textarea
             {...register("remarks")}
             aria-label="Dodatkowy opis (DodatkowyOpis w KSeF)"
@@ -486,7 +595,7 @@ export function InvoiceDetailPageClient({
 
   const form = useForm<InvoiceEditFormValues>({
     resolver: zodResolver(invoiceEditFormSchema),
-    defaultValues: toFormValues(initial, issuerNip),
+    defaultValues: formValuesWithOptionalRemarksPrefix(initial, issuerNip),
     mode: "onChange",
   });
 
@@ -494,7 +603,12 @@ export function InvoiceDetailPageClient({
   const isDirty = formState.isDirty;
 
   useEffect(() => {
-    reset(toFormValues(initial, issuerOptions?.issuerNip ?? ""));
+    reset(
+      formValuesWithOptionalRemarksPrefix(
+        initial,
+        issuerOptions?.issuerNip ?? "",
+      ),
+    );
     // Only when server snapshot changes — not when `initial` reference changes alone.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- initial matches parsedSnapshot from parent
   }, [parsedSnapshot, reset, issuerOptions?.issuerNip]);
@@ -525,7 +639,7 @@ export function InvoiceDetailPageClient({
   });
 
   function onDiscard() {
-    reset(toFormValues(initial, issuerNip));
+    reset(formValuesWithOptionalRemarksPrefix(initial, issuerNip));
   }
 
   return (
@@ -571,7 +685,11 @@ export function InvoiceDetailPageClient({
           onSubmit={onSave}
           className="space-y-8"
         >
-          <InvoiceFormSections initial={initial} issuerOptions={issuerOptions} />
+          <InvoiceFormSections
+            initial={initial}
+            issuerOptions={issuerOptions}
+            parsedSnapshotKey={parsedSnapshot}
+          />
         </form>
       </FormProvider>
     </div>
