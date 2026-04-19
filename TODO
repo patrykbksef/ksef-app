@@ -17,11 +17,18 @@ DONE:
 
    TODO:
 
-9. PRZYCISKI ZAPISZ I WYŚLIJ POD FORMULARZEM
-10. PASSWORD POLICY dla nowych kont
-11. remove updating invoices to the DB - display invoices from KSEF, add tanstack query
-12. change password option
-13. hide for now option for creating accounts
+9. po rejestracji przekierowanie na localhost
+10. w ustawieniach - mozliwosc dodania prefilled pól, jeśli empty
+    (ten prefix dla pracownicy Marcina)
+11. PRZYCISKI ZAPISZ I WYŚLIJ POD FORMULARZEM
+12. Moliwość dodania róznych firm do jednego konta i select jednego z nich
+
+13. PASSWORD POLICY dla nowych kont
+14. remove updating invoices to the DB - display invoices from KSEF, add tanstack query
+15. change password option
+16. hide for now option for creating accounts
+17. AZURE Devops - currently 500 pages per month, increase if it will work!
+18. AZURE Devops - create network security, so only vercel can call my endpoint?
 
 PROMOWANIE:
 Facebook: "Biura rachunkowe"

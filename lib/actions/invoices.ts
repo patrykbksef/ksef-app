@@ -11,6 +11,8 @@ import {
   AiProvidersExhaustedError,
   parseInvoiceWithAi,
 } from "@/lib/invoice/ai-parser";
+import { azureDocumentIntelligenceConfigured } from "@/lib/invoice/azure-document-intelligence";
+import { parseInvoiceWithAzureDi } from "@/lib/invoice/parse-invoice-azure-di";
 import { parseInterRiskInvoiceText } from "@/lib/invoice/parser";
 import { extractTextFromPdfBuffer } from "@/lib/invoice/pdf-text";
 import { sendInvoiceToKsefWithToken } from "@/lib/ksef/client";
@@ -383,6 +385,191 @@ export async function uploadInvoiceAi(
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard-ai");
+  redirect(`/invoices/${inserted.id}`);
+}
+
+/** Same flow as {@link uploadInvoiceAi} but parses with Azure Document Intelligence + code mapping (no LLM). */
+export async function uploadInvoiceAzureDi(
+  _prev: UploadInvoiceState,
+  formData: FormData,
+): Promise<UploadInvoiceState> {
+  const file = formData.get("file");
+  if (!(file instanceof File)) {
+    return { error: "Nie wybrano pliku" };
+  }
+
+  const uploadParsed = fileUploadSchema.safeParse({
+    name: file.name,
+    size: file.size,
+    type: file.type || "application/octet-stream",
+  });
+  if (!uploadParsed.success) {
+    return {
+      error: uploadParsed.error.issues[0]?.message ?? "Nieprawidłowy plik",
+    };
+  }
+
+  if (!azureDocumentIntelligenceConfigured()) {
+    return {
+      error:
+        "Brak AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT i AZURE_DOCUMENT_INTELLIGENCE_KEY w zmiennych środowiska.",
+    };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
+
+  if (userErr || !user) {
+    return { error: "Brak sesji — zaloguj się ponownie" };
+  }
+
+  const { data: profileRaw } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  const profileParsed = profileRaw
+    ? profileRowSchema.safeParse(profileRaw)
+    : null;
+  if (!profileParsed?.success) {
+    return {
+      error: "Najpierw uzupełnij profil w Ustawieniach",
+    };
+  }
+
+  const profile = profileParsed.data;
+  const xmlOptions = buildFa3XmlOptionsFromProfile(profile);
+  if (!xmlOptions) {
+    return {
+      error:
+        "Uzupełnij w Ustawieniach: NIP, token KSeF dla wybranego środowiska (demo lub produkcja), nazwę sprzedawcy i pierwszą linię adresu",
+    };
+  }
+
+  let buf: ArrayBuffer;
+  try {
+    buf = await file.arrayBuffer();
+  } catch (e) {
+    const errorMessage = e instanceof Error ? e.message : String(e);
+    console.error("Invoice upload (Azure DI): PDF read failed", {
+      scope: "invoice.upload.azure-di",
+      userId: user.id,
+      fileName: file.name,
+      fileSize: file.size,
+      step: "pdf_buffer",
+      errorMessage,
+    });
+    return { error: "Nie udało się odczytać pliku PDF" };
+  }
+
+  let parsedInvoice;
+  try {
+    parsedInvoice = await parseInvoiceWithAzureDi(buf);
+  } catch (e) {
+    const errorMessage = e instanceof Error ? e.message : String(e);
+    console.error("Invoice upload (Azure DI): parse failed", {
+      scope: "invoice.upload.azure-di",
+      userId: user.id,
+      fileName: file.name,
+      fileSize: file.size,
+      step: "azure_di_parse",
+      errorMessage,
+    });
+    return {
+      error:
+        e instanceof Error
+          ? e.message
+          : "Nie udało się sparsować faktury z PDF (Azure Document Intelligence)",
+    };
+  }
+
+  let xml: string;
+  try {
+    xml = buildFa3XmlFromParsedInvoice(parsedInvoice, xmlOptions);
+  } catch (e) {
+    const errorMessage = e instanceof Error ? e.message : String(e);
+    console.error("Invoice upload (Azure DI): XML build failed", {
+      scope: "invoice.upload.azure-di",
+      userId: user.id,
+      fileName: file.name,
+      fileSize: file.size,
+      step: "xml",
+      errorMessage,
+    });
+    return {
+      error:
+        e instanceof Error
+          ? e.message
+          : "Nie udało się zbudować XML KSeF z faktury",
+    };
+  }
+
+  const autoSend = profile.auto_send === true;
+
+  let status: "pending_review" | "success" | "error" = "pending_review";
+  let ksefRef: string | null = null;
+  let errMsg: string | null = null;
+
+  if (autoSend) {
+    try {
+      const result = await sendInvoiceToKsefWithToken({
+        contextNip: xmlOptions.issuerNip,
+        ksefToken: ksefTokenForProfile(profile)!,
+        invoiceXml: xml,
+        ksefEnvironment: resolveKsefEnvironment(profile.ksef_environment),
+      });
+      ksefRef =
+        result.invoiceKsefNumber ?? result.invoiceReferenceNumber ?? null;
+      status = "success";
+    } catch (e) {
+      status = "error";
+      errMsg = e instanceof Error ? e.message : String(e);
+      console.error("Invoice upload (Azure DI): KSeF send failed", {
+        scope: "invoice.upload.azure-di",
+        userId: user.id,
+        fileName: file.name,
+        fileSize: file.size,
+        step: "ksef",
+        errorMessage: errMsg,
+        xmlLength: xml.length,
+        xmlHead: xml.slice(0, 2000),
+      });
+    }
+  }
+
+  const { data: inserted, error: insErr } = await supabase
+    .from("invoices")
+    .insert({
+      user_id: user.id,
+      file_name: file.name,
+      parsed_data: parsedInvoice,
+      xml_content: xml,
+      ksef_reference: ksefRef,
+      status,
+      error_message: errMsg,
+    })
+    .select("id")
+    .single();
+
+  if (insErr || !inserted?.id) {
+    console.error("Invoice upload (Azure DI): DB insert failed", {
+      scope: "invoice.upload.azure-di",
+      userId: user.id,
+      fileName: file.name,
+      fileSize: file.size,
+      step: "db_insert",
+      errorMessage: insErr?.message ?? "no_row",
+    });
+    return { error: insErr?.message ?? "Nie udało się zapisać faktury" };
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard-ai");
+  revalidatePath("/dashboard-azure-ai");
   redirect(`/invoices/${inserted.id}`);
 }
 

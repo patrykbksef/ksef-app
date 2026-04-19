@@ -104,7 +104,7 @@ export function SettingsForm({ defaultValues }: Props) {
                       Środowisko produkcyjne KSeF
                     </FormLabel>
                     <FormDescription className="space-y-2 text-sm leading-relaxed">
-                      <p>
+                      <span className="block">
                         <span className="text-foreground font-medium">
                           Wyłączone (demo / TR):
                         </span>{" "}
@@ -123,8 +123,8 @@ export function SettingsForm({ defaultValues }: Props) {
                           nie mają skutków prawnych
                         </strong>{" "}
                         w realnym obiegu.
-                      </p>
-                      <p>
+                      </span>
+                      <span>
                         <span className="text-foreground font-medium">
                           Włączone (produkcja / PRD):
                         </span>{" "}
@@ -142,7 +142,7 @@ export function SettingsForm({ defaultValues }: Props) {
                           prawdziwego KSeF
                         </strong>{" "}
                         z pełnymi skutkami prawnymi.
-                      </p>
+                      </span>
                     </FormDescription>
                   </div>
                   <FormControl>
