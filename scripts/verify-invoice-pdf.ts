@@ -7,6 +7,7 @@ import {
   extractInvoiceNumber,
   parseInterRiskInvoiceText,
 } from "../lib/invoice/parser";
+import { findRemarksTokenByPrefix } from "../lib/invoice/remarks-lookup-from-pdf";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pdfPath = path.join(__dirname, "..", "invoice-example.pdf");
@@ -25,8 +26,25 @@ function assertInvoiceNumberSnippets() {
   console.log("OK extractInvoiceNumber snippets");
 }
 
+function assertRemarksLookupSnippets() {
+  const t = findRemarksTokenByPrefix(
+    "foo GAP_2026/WNR/355677/1 bar",
+    "GAP_",
+  );
+  if (t !== "GAP_2026/WNR/355677/1") {
+    console.error("findRemarksTokenByPrefix GAP_:", t);
+    process.exit(1);
+  }
+  if (findRemarksTokenByPrefix("no match", "GAP_") !== null) {
+    console.error("findRemarksTokenByPrefix expected null");
+    process.exit(1);
+  }
+  console.log("OK findRemarksTokenByPrefix snippets");
+}
+
 async function main() {
   assertInvoiceNumberSnippets();
+  assertRemarksLookupSnippets();
 
   if (fs.existsSync(pdfPath)) {
     const buf = fs.readFileSync(pdfPath);
@@ -103,6 +121,32 @@ async function main() {
       process.exit(1);
     }
     console.log("OK examples/1.pdf (Europ Assistance) lineItems:", europ.lineItems.length);
+  }
+
+  const diffDatesPath = path.join(__dirname, "..", "examples", "invoice-different-dates.pdf");
+  if (fs.existsSync(diffDatesPath)) {
+    const db = fs.readFileSync(diffDatesPath);
+    const dab = db.buffer.slice(db.byteOffset, db.byteOffset + db.byteLength);
+    const dtext = await extractTextFromPdfBuffer(dab as ArrayBuffer);
+    const diffDates = parseInterRiskInvoiceText(dtext);
+    if (diffDates.issueDate === diffDates.saleDate) {
+      console.error(
+        "invoice-different-dates.pdf: issueDate and saleDate must differ, got:",
+        diffDates.issueDate,
+        diffDates.saleDate,
+      );
+      process.exit(1);
+    }
+    if (diffDates.issueDate !== "2026-04-23") {
+      console.error("invoice-different-dates.pdf: unexpected issueDate:", diffDates.issueDate);
+      process.exit(1);
+    }
+    console.log(
+      "OK examples/invoice-different-dates.pdf issueDate:",
+      diffDates.issueDate,
+      "saleDate:",
+      diffDates.saleDate,
+    );
   }
 
   const extraPdfs = [

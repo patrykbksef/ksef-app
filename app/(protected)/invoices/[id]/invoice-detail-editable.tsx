@@ -39,6 +39,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { recalcParsedInvoice } from "@/lib/invoice/recalc-parsed-invoice";
+import { REMARKS_PREFIX_TEXT_LS_KEY } from "@/lib/invoice/remarks-lookup-from-pdf";
 import type { KsefEnvironment } from "@/lib/ksef/config";
 import {
   issuerPartyFromParsed,
@@ -86,7 +87,6 @@ const invoiceEditFormSchema = z.object({
 export type InvoiceEditFormValues = z.infer<typeof invoiceEditFormSchema>;
 
 const REMARKS_AUTO_PREFIX_LS_KEY = "ksef-invoice-remarks-auto-prefix";
-const REMARKS_PREFIX_TEXT_LS_KEY = "ksef-invoice-remarks-prefix-text";
 
 /** `null` w localStorage = brak zapisu */
 function readRemarksPrefixTextFromStorage(): string {
@@ -515,9 +515,13 @@ function InvoiceFormSections({
           <CardTitle>Dodatkowy opis</CardTitle>
           <CardDescription>
             Treść trafia do KSeF jako DodatkowyOpis (klucz „Uwagi&quot;). Pole
-            opcjonalne — zostaw puste, jeśli nie potrzebujesz. Możesz włączyć
-            automatyczne wstawianie wybranego prefiksu, gdy pole jest puste;
-            prefiks i opcja są zapamiętywane w tej przeglądarce.
+            opcjonalne — zostaw puste, jeśli nie potrzebujesz. Tekst prefiksu
+            (poniżej) jest zapamiętywany w tej przeglądarce i przy wgrywaniu PDF
+            z panelu wysyłany na serwer: jeśli pole Uwagi jest puste, a w tekście
+            PDF występuje ciąg zaczynający się od tego prefiksu (np.{" "}
+            <span className="font-mono">GAP_2026/WNR/355677/1</span>), zostanie
+            automatycznie użyty przy zapisie faktury. Możesz też włączyć
+            wstawianie samego prefiksu, gdy pole jest puste.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">

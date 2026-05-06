@@ -193,14 +193,6 @@ export async function sendInvoiceToKsefWithToken(options: {
   ksefEnvironment: KsefEnvironment;
 }): Promise<KsefSendResult> {
   const baseUrl = ksefApiBaseUrl(options.ksefEnvironment);
-  console.error("[KSeF send] start", {
-    scope: "ksef.send",
-    ksefEnvironment: options.ksefEnvironment,
-    baseUrl,
-    contextNip: options.contextNip,
-    xmlLength: options.invoiceXml.length,
-    xmlHead: options.invoiceXml.slice(0, 1500),
-  });
 
   const accessToken = await authenticateWithKsefToken(options.contextNip, options.ksefToken, baseUrl);
 
@@ -262,13 +254,6 @@ export async function sendInvoiceToKsefWithToken(options: {
   );
 
   const invoiceRef = invoiceSend.referenceNumber;
-  console.error("[KSeF send] invoice accepted into session", {
-    scope: "ksef.send",
-    sessionRef,
-    invoiceRef,
-    invoiceHash: enc.invoiceHash,
-    invoiceSize: enc.invoiceSize,
-  });
 
   try {
     await ksefJson(baseUrl, `/sessions/online/${encodeURIComponent(sessionRef)}/close`, {
@@ -290,12 +275,6 @@ export async function sendInvoiceToKsefWithToken(options: {
     });
     const code = st.status?.code;
     if (code === 200 || (st.invoiceCount && (st.successfulInvoiceCount ?? 0) > 0)) {
-      console.error("[KSeF send] session status OK", {
-        scope: "ksef.send",
-        sessionRef,
-        attempt: i,
-        sessionStatus: st,
-      });
       break;
     }
     if (code !== undefined && code >= 400) {
@@ -319,13 +298,6 @@ export async function sendInvoiceToKsefWithToken(options: {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     const inv = meta.invoices?.[0];
-    console.error("[KSeF send] invoice list poll", {
-      scope: "ksef.send",
-      sessionRef,
-      attempt: i,
-      firstInvoice: inv,
-      rawPage: meta,
-    });
     if (inv?.ksefNumber) {
       ksefNumber = inv.ksefNumber;
       break;

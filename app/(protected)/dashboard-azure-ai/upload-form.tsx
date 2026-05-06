@@ -7,6 +7,10 @@ import {
   uploadInvoiceAzureDi,
   type UploadInvoiceState,
 } from "@/lib/actions/invoices";
+import {
+  REMARKS_LOOKUP_PREFIX_FORM_FIELD,
+  REMARKS_PREFIX_TEXT_LS_KEY,
+} from "@/lib/invoice/remarks-lookup-from-pdf";
 import { cn } from "@/lib/utils";
 
 function isNextRedirectError(e: unknown): boolean {
@@ -58,6 +62,13 @@ export function DashboardAzureDiUpload({ disabled }: { disabled: boolean }) {
       if (disabled || !file || pending) return;
       const fd = new FormData();
       fd.append("file", file);
+      try {
+        const raw = localStorage.getItem(REMARKS_PREFIX_TEXT_LS_KEY);
+        const prefix = (raw ?? "").trim().slice(0, 64);
+        if (prefix) fd.append(REMARKS_LOOKUP_PREFIX_FORM_FIELD, prefix);
+      } catch {
+        /* ignore */
+      }
       startTransition(async () => {
         const initial: UploadInvoiceState = {};
         try {

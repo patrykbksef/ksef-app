@@ -15,6 +15,10 @@ import { azureDocumentIntelligenceConfigured } from "@/lib/invoice/azure-documen
 import { parseInvoiceWithAzureDi } from "@/lib/invoice/parse-invoice-azure-di";
 import { parseInterRiskInvoiceText } from "@/lib/invoice/parser";
 import { extractTextFromPdfBuffer } from "@/lib/invoice/pdf-text";
+import {
+  mergeRemarksFromPdfLookup,
+  parseRemarksLookupPrefixFromFormData,
+} from "@/lib/invoice/remarks-lookup-from-pdf";
 import { sendInvoiceToKsefWithToken } from "@/lib/ksef/client";
 import { resolveKsefEnvironment } from "@/lib/ksef/config";
 import { recalcParsedInvoice } from "@/lib/invoice/recalc-parsed-invoice";
@@ -125,6 +129,12 @@ export async function uploadInvoice(
           : "Nie udało się sparsować faktury z PDF",
     };
   }
+
+  parsedInvoice = mergeRemarksFromPdfLookup(
+    parsedInvoice,
+    text,
+    parseRemarksLookupPrefixFromFormData(formData),
+  );
 
   let xml: string;
   try {
@@ -304,6 +314,18 @@ export async function uploadInvoiceAi(
           : "Nie udało się sparsować faktury z PDF (AI)",
     };
   }
+
+  let textForRemarksLookup = "";
+  try {
+    textForRemarksLookup = await extractTextFromPdfBuffer(buf);
+  } catch {
+    /* optional — remarks lookup only */
+  }
+  parsedInvoice = mergeRemarksFromPdfLookup(
+    parsedInvoice,
+    textForRemarksLookup,
+    parseRemarksLookupPrefixFromFormData(formData),
+  );
 
   let xml: string;
   try {
@@ -488,6 +510,18 @@ export async function uploadInvoiceAzureDi(
           : "Nie udało się sparsować faktury z PDF (Azure Document Intelligence)",
     };
   }
+
+  let textForRemarksLookup = "";
+  try {
+    textForRemarksLookup = await extractTextFromPdfBuffer(buf);
+  } catch {
+    /* optional — remarks lookup only */
+  }
+  parsedInvoice = mergeRemarksFromPdfLookup(
+    parsedInvoice,
+    textForRemarksLookup,
+    parseRemarksLookupPrefixFromFormData(formData),
+  );
 
   let xml: string;
   try {

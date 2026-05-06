@@ -32,10 +32,7 @@ const INTERRISK_LINE_ROW =
 
 /** Legacy: split `3.501 km.` → `3.50 1 km.` — wrong when `1` belongs to `235`. */
 function normalizeFusedPriceQtyRow(line: string): string {
-  return line.replace(
-    /(\d+)\.(\d{2})(\d)(\s+(?:km\.|ope\.|h\.))/g,
-    "$1.$2 $3$4",
-  );
+  return line.replace(/(\d+)\.(\d{2})(\d)(\s+(?:km\.|ope\.|h\.))/g, "$1.$2 $3$4");
 }
 
 function parseInterRiskTableRow(
@@ -99,6 +96,7 @@ function normalizeInvoiceNumberToken(raw: string): string {
 export function extractInvoiceNumber(text: string): string | null {
   const patterns: RegExp[] = [
     /FAKTURA\s+VAT\s+NR\s+([^\r\n]+)/i,
+    /Podgląd\s+rozliczenia\s+do\s+FV\s*:?\s*(?:nr\.?\s*)?(\S+)/i,
     /Faktura\s+(?:VAT\s+)?nr\.?\s*:?\s*(\S+)/i,
     /Numer\s+faktury\s*:?\s*(\S+)/i,
     /Nr\.?\s+faktury\s*:?\s*(\S+)/i,
@@ -178,18 +176,33 @@ function extractPolishDates(text: string): string[] {
   return ordered;
 }
 
+/** Match ISO YYYY-MM-DD or Polish DD-MM-YYYY after a label regex and return ISO. */
+function extractLabeledDateIso(text: string, labelRe: RegExp): string | null {
+  const isoRe = new RegExp(labelRe.source + String.raw`(\d{4})-(\d{2})-(\d{2})`, "i");
+  const isoM = text.match(isoRe);
+  if (isoM?.[1] && isoM[2] && isoM[3]) return `${isoM[1]}-${isoM[2]}-${isoM[3]}`;
+  const plRe = new RegExp(labelRe.source + String.raw`(\d{2})-(\d{2})-(\d{4})`, "i");
+  const plM = text.match(plRe);
+  if (plM?.[1] && plM[2] && plM[3]) return `${plM[3]}-${plM[2]}-${plM[1]}`;
+  return null;
+}
+
 /** Prefer explicit PL invoice lines so payment due is not used as sale date. */
 function extractIssueAndSaleDates(text: string): {
   issueDate: string;
   saleDate: string;
 } {
-  const saleM = text.match(/Data\s+sprzedaży\s*:?\s*(\d{4}-\d{2}-\d{2})/i);
-  const issueM =
-    text.match(/dnia\s*:?\s*(\d{4}-\d{2}-\d{2})/i) ??
-    text.match(/Data\s+wystawienia\s*:?\s*(\d{4}-\d{2}-\d{2})/i);
+  const saleIso = extractLabeledDateIso(text, /Data\s+sprzeda[żz]y\s*:?\s*/);
+  const issueIso =
+    extractLabeledDateIso(text, /dnia\s*:?\s*/) ?? extractLabeledDateIso(text, /Data\s+wystawienia\s*:?\s*/);
   const ordered = extractPolishDates(text);
-  const issueDate = issueM?.[1] ?? ordered[0] ?? "";
-  const saleDate = saleM?.[1] ?? issueM?.[1] ?? ordered[0] ?? "";
+  const issueDate = issueIso ?? ordered[0] ?? "";
+
+  // Two-column PDF layouts put labels ("Data sprzedaży") far from the date
+  // values. When the label exists but no adjacent date was found, use the
+  // second unique date in document order (first = issue, second = sale).
+  const hasSaleLabel = /Data\s+sprzeda[żz]y/i.test(text);
+  const saleDate = saleIso ?? (hasSaleLabel && ordered.length >= 2 ? ordered[1] : null) ?? issueIso ?? ordered[0] ?? "";
   return { issueDate, saleDate };
 }
 
@@ -210,10 +223,7 @@ function splitNameLineByIssuerPrefix(
   const trimmed = nameLine.trim();
   const parts = issuer.split(/\s+/).filter(Boolean);
   if (parts.length === 0) return null;
-  const re = new RegExp(
-    `^\\s*${parts.map(escapeRegExp).join("\\s+")}\\s*`,
-    "i",
-  );
+  const re = new RegExp(`^\\s*${parts.map(escapeRegExp).join("\\s+")}\\s*`, "i");
   const m = trimmed.match(re);
   if (!m) return null;
   const buyerName = trimmed.slice(m[0].length).trim();
@@ -237,9 +247,7 @@ function splitEuropAssistanceTwoColumnParties(
   const nameLine = block[0] ?? "";
   let sellerName = nameLine.trim();
   let buyerName = "";
-  const byIssuer = issuerName
-    ? splitNameLineByIssuerPrefix(nameLine, issuerName)
-    : null;
+  const byIssuer = issuerName ? splitNameLineByIssuerPrefix(nameLine, issuerName) : null;
   if (byIssuer) {
     sellerName = byIssuer.sellerName;
     buyerName = byIssuer.buyerName;
@@ -262,9 +270,7 @@ function splitEuropAssistanceTwoColumnParties(
       buyerRest.push(ul[2]!.trim());
       continue;
     }
-    const pc = line.match(
-      /^(\d{2}-\d{3}\s+.+?)\s+(\d{2}-\d{3}\s+.+)$/,
-    );
+    const pc = line.match(/^(\d{2}-\d{3}\s+.+?)\s+(\d{2}-\d{3}\s+.+)$/);
     if (pc) {
       sellerRest.push(pc[1]!.trim());
       buyerRest.push(pc[2]!.trim());
@@ -370,12 +376,7 @@ function parseEuropAssistanceTotalsRow(
     return null;
   }
 
-  const unit =
-    qty === 1
-      ? "szt."
-      : /km|holow|kursy|dojazd|powrót|etoll|opłat/i.test(name)
-        ? "km."
-        : "szt.";
+  const unit = qty === 1 ? "szt." : /km|holow|kursy|dojazd|powrót|etoll|opłat/i.test(name) ? "km." : "szt.";
 
   return {
     lineNumber,
@@ -409,9 +410,7 @@ function parseVatSummaryAndTotals(text: string) {
     });
   }
 
-  const suma = text.match(
-    /([\d.,]+)\s*zł\.\s*([\d.,]+)\s*zł\.\s*SUMA\s*([\d.,]+)\s*zł\./i,
-  );
+  const suma = text.match(/([\d.,]+)\s*zł\.\s*([\d.,]+)\s*zł\.\s*SUMA\s*([\d.,]+)\s*zł\./i);
   let totals = { net: 0, vat: 0, gross: 0 };
   if (suma) {
     totals = {
@@ -426,12 +425,8 @@ function parseVatSummaryAndTotals(text: string) {
 
 function extractPayment(text: string) {
   const days = text.match(/Termin\s+Płatnosci\s*\(dni\):\s*(\d+)/i);
-  const due =
-    text.match(/Do\s+zapłaty:\s*([\d.,]+)\s*zł\./i) ??
-    text.match(/Do\s+zapłaty:\s*([\d.,]+)\b/i);
-  const method =
-    text.match(/Forma\s+płatności:\s*\n?\s*([^\n]+)/i) ??
-    text.match(/Sposób\s+zapłaty:\s*([^\n]+)/i);
+  const due = text.match(/Do\s+zapłaty:\s*([\d.,]+)\s*zł\./i) ?? text.match(/Do\s+zapłaty:\s*([\d.,]+)\b/i);
+  const method = text.match(/Forma\s+płatności:\s*\n?\s*([^\n]+)/i) ?? text.match(/Sposób\s+zapłaty:\s*([^\n]+)/i);
   return {
     paymentDays: days ? Number.parseInt(days[1]!, 10) : undefined,
     amountDue: due ? parsePlNumber(due[1]!) : undefined,
@@ -464,10 +459,7 @@ export type ParseInterRiskInvoiceTextOptions = {
 /**
  * Parse plain text extracted from InterRisk-style PDF invoices.
  */
-export function parseInterRiskInvoiceText(
-  rawText: string,
-  options?: ParseInterRiskInvoiceTextOptions,
-): ParsedInvoice {
+export function parseInterRiskInvoiceText(rawText: string, options?: ParseInterRiskInvoiceTextOptions): ParsedInvoice {
   const issuerName = options?.issuerName?.trim();
   const text = rawText.replace(/\u00a0/g, " ");
   const lineCount = text.split(/\r?\n/).length;
@@ -481,9 +473,7 @@ export function parseInterRiskInvoiceText(
       lineCount,
       textPreview: truncatePreview(text),
     });
-    throw new Error(
-      "Nie znaleziono numeru faktury (np. „FAKTURA VAT NR …”, „Faktura nr …”)",
-    );
+    throw new Error("Nie znaleziono numeru faktury (np. „FAKTURA VAT NR …”, „Faktura nr …”)");
   }
 
   const nips = extractNips(text);
@@ -507,30 +497,17 @@ export function parseInterRiskInvoiceText(
   const nipSellerIdx = findNipLineIndex(lines, sellerNip);
   const nipBuyerIdx = findNipLineIndex(lines, buyerNip);
 
-  const sprzedawcaHeaderIdx = lines.findIndex((l) =>
-    /Sprzedawca.*Nabywca/i.test(l),
-  );
+  const sprzedawcaHeaderIdx = lines.findIndex((l) => /Sprzedawca.*Nabywca/i.test(l));
 
-  let sellerLinesRaw =
-    nipSellerIdx > 0 ? lines.slice(1, nipSellerIdx).filter(Boolean) : [];
-  let buyerLinesRaw =
-    nipBuyerIdx > nipSellerIdx + 1
-      ? lines.slice(nipSellerIdx + 1, nipBuyerIdx).filter(Boolean)
-      : [];
+  let sellerLinesRaw = nipSellerIdx > 0 ? lines.slice(1, nipSellerIdx).filter(Boolean) : [];
+  let buyerLinesRaw = nipBuyerIdx > nipSellerIdx + 1 ? lines.slice(nipSellerIdx + 1, nipBuyerIdx).filter(Boolean) : [];
 
   const usedEuropPartySplit =
-    sprzedawcaHeaderIdx >= 0 &&
-    nipSellerIdx === nipBuyerIdx &&
-    nipSellerIdx > sprzedawcaHeaderIdx;
+    sprzedawcaHeaderIdx >= 0 && nipSellerIdx === nipBuyerIdx && nipSellerIdx > sprzedawcaHeaderIdx;
 
   if (usedEuropPartySplit) {
-    const block = lines
-      .slice(sprzedawcaHeaderIdx + 1, nipSellerIdx)
-      .filter(Boolean);
-    const split = splitEuropAssistanceTwoColumnParties(
-      block,
-      issuerName || undefined,
-    );
+    const block = lines.slice(sprzedawcaHeaderIdx + 1, nipSellerIdx).filter(Boolean);
+    const split = splitEuropAssistanceTwoColumnParties(block, issuerName || undefined);
     sellerLinesRaw = split.sellerLines;
     buyerLinesRaw = split.buyerLines;
   }
@@ -558,17 +535,10 @@ export function parseInterRiskInvoiceText(
 
   const itemsStart = lines.findIndex(
     (l) =>
-      l.includes("Nazwa usługi") ||
-      l.includes("Nazwa us") ||
-      /Nazwa\s+towaru/i.test(l) ||
-      /L\.p\.\s+Nazwa/i.test(l),
+      l.includes("Nazwa usługi") || l.includes("Nazwa us") || /Nazwa\s+towaru/i.test(l) || /L\.p\.\s+Nazwa/i.test(l),
   );
   let itemsEnd = lines.findIndex(
-    (l, i) =>
-      i > itemsStart &&
-      (/^\d+(?:[.,]\d+)?%\s/.test(l) ||
-        /^Razem\s*:/i.test(l) ||
-        /^w\s+tym\s*:/i.test(l)),
+    (l, i) => i > itemsStart && (/^\d+(?:[.,]\d+)?%\s/.test(l) || /^Razem\s*:/i.test(l) || /^w\s+tym\s*:/i.test(l)),
   );
   if (itemsStart < 0) {
     console.error("Invoice parse failed: line items section not found", {
@@ -585,10 +555,7 @@ export function parseInterRiskInvoiceText(
   let dataStart = itemsStart + 1;
   const itemsHeaderLine = lines[itemsStart] ?? "";
   if (/L\.p\.\s+Nazwa/i.test(itemsHeaderLine)) {
-    while (
-      dataStart < lines.length &&
-      dataStart < (itemsEnd > 0 ? itemsEnd : lines.length)
-    ) {
+    while (dataStart < lines.length && dataStart < (itemsEnd > 0 ? itemsEnd : lines.length)) {
       const l = lines[dataStart]!;
       if (/^\d+\s+\D/u.test(l)) break;
       if (/^Razem\s*:/i.test(l)) break;
@@ -643,10 +610,7 @@ export function parseInterRiskInvoiceText(
   const bank = extractBank(text, buyerNip);
 
   const vatSummaryFromLines = (): ParsedInvoice["vatSummary"] => {
-    const map = new Map<
-      number,
-      { net: number; vat: number; gross: number }
-    >();
+    const map = new Map<number, { net: number; vat: number; gross: number }>();
     for (const i of lineItems) {
       const e = map.get(i.vatRate) ?? { net: 0, vat: 0, gross: 0 };
       e.net += i.netAmount;
@@ -662,8 +626,7 @@ export function parseInterRiskInvoiceText(
     }));
   };
 
-  const vatSummary =
-    vatFromDoc.length > 0 ? vatFromDoc : vatSummaryFromLines();
+  const vatSummary = vatFromDoc.length > 0 ? vatFromDoc : vatSummaryFromLines();
 
   const raw = {
     invoiceNumber,
@@ -686,12 +649,9 @@ export function parseInterRiskInvoiceText(
     lineItems,
     vatSummary,
     totals: {
-      net:
-        totals.net || lineItems.reduce((s, i) => s + i.netAmount, 0),
-      vat:
-        totals.vat || lineItems.reduce((s, i) => s + i.vatAmount, 0),
-      gross:
-        totals.gross || lineItems.reduce((s, i) => s + i.grossAmount, 0),
+      net: totals.net || lineItems.reduce((s, i) => s + i.netAmount, 0),
+      vat: totals.vat || lineItems.reduce((s, i) => s + i.vatAmount, 0),
+      gross: totals.gross || lineItems.reduce((s, i) => s + i.grossAmount, 0),
     },
     currency: "PLN" as const,
   };
@@ -705,9 +665,7 @@ export function parseInterRiskInvoiceText(
       zodMessage: parsed.error.message,
       lineItemCount: lineItems.length,
     });
-    throw new Error(
-      `Walidacja sparsowanej faktury nie powiodła się: ${parsed.error.message}`,
-    );
+    throw new Error(`Walidacja sparsowanej faktury nie powiodła się: ${parsed.error.message}`);
   }
   return parsed.data;
 }
