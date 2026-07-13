@@ -149,6 +149,40 @@ async function main() {
     );
   }
 
+  // Test modified PDF (no "NIP" label before seller NIP, no "Podgląd rozliczenia" before invoice number)
+  const modifiedPath = path.join(__dirname, "..", "examples", "nie-dziala-zmodyfikowana-by-me.pdf");
+  if (fs.existsSync(modifiedPath)) {
+    const mb = fs.readFileSync(modifiedPath);
+    const mab = mb.buffer.slice(mb.byteOffset, mb.byteOffset + mb.byteLength);
+    const mtext = await extractTextFromPdfBuffer(mab as ArrayBuffer);
+    const modified = parseInterRiskInvoiceText(mtext);
+    if (modified.invoiceNumber !== "74B/04/2026") {
+      console.error("nie-dziala-zmodyfikowana: unexpected invoiceNumber:", modified.invoiceNumber);
+      process.exit(1);
+    }
+    if (modified.seller.nip !== "5260214686") {
+      console.error("nie-dziala-zmodyfikowana: unexpected seller NIP:", modified.seller.nip);
+      process.exit(1);
+    }
+    if (modified.buyer.nip !== "7791208596") {
+      console.error("nie-dziala-zmodyfikowana: unexpected buyer NIP:", modified.buyer.nip);
+      process.exit(1);
+    }
+    if (!modified.seller.name.includes("Compensa")) {
+      console.error("nie-dziala-zmodyfikowana: seller name missing Compensa:", modified.seller.name);
+      process.exit(1);
+    }
+    if (!modified.buyer.name.includes("Pomoc Drogowa")) {
+      console.error("nie-dziala-zmodyfikowana: buyer name missing Pomoc Drogowa:", modified.buyer.name);
+      process.exit(1);
+    }
+    if (modified.lineItems.length !== 3) {
+      console.error("nie-dziala-zmodyfikowana: expected 3 lineItems, got:", modified.lineItems.length);
+      process.exit(1);
+    }
+    console.log("OK examples/nie-dziala-zmodyfikowana-by-me.pdf (no-label fallback) lineItems:", modified.lineItems.length);
+  }
+
   const extraPdfs = [
     path.join(__dirname, "..", "invoice-example2.pdf"),
     path.join(

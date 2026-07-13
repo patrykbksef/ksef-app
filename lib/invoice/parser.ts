@@ -1,4 +1,5 @@
 import { parsedInvoiceSchema, type ParsedInvoice } from "@/lib/validations/invoice";
+import { isValidNipChecksum } from "@/lib/validations/profile";
 import { mergeLeadingNameLinesFromAddress } from "@/lib/invoice/party-name-address";
 
 const LOG_SCOPE = "invoice.parser";
@@ -109,6 +110,26 @@ export function extractInvoiceNumber(text: string): string | null {
     const n = normalizeInvoiceNumberToken(cap);
     if (n.length > 0) return n;
   }
+
+  // Fallback: scan header area for tokens containing year + separator (slash/dash)
+  const currentYear = new Date().getFullYear();
+  const headerLines = text.split(/\r?\n/).slice(0, 15);
+  for (const line of headerLines) {
+    const tokens = line.trim().split(/\s+/);
+    for (const token of tokens) {
+      if (token.length < 5 || token.length > 40) continue;
+      if (/^\d{2}[-./]\d{2}[-./]\d{4}$/.test(token)) continue;
+      if (/^\d{4}[-./]\d{2}[-./]\d{2}$/.test(token)) continue;
+      if (/^\d{10,}$/.test(token.replace(/\D/g, ""))) continue;
+      if (
+        (token.includes("/") || token.includes("-")) &&
+        (token.includes(String(currentYear)) || token.includes(String(currentYear - 1)))
+      ) {
+        return normalizeInvoiceNumberToken(token);
+      }
+    }
+  }
+
   return null;
 }
 
@@ -116,8 +137,10 @@ export function extractInvoiceNumber(text: string): string | null {
 function nipDigitsAfterLabel(tail: string): string | null {
   const compact =
     tail.match(/^(\d{10})\b/) ??
-    tail.match(/^(\d{3}-\d{3}-\d{2}-\d{3})\b/) ??
-    tail.match(/^(\d{3}\s+\d{3}\s+\d{2}\s+\d{3})\b/);
+    tail.match(/^(\d{3}-\d{3}-\d{2}-\d{2})\b/) ??
+    tail.match(/^(\d{3}-\d{2}-\d{2}-\d{3})\b/) ??
+    tail.match(/^(\d{3}\s+\d{3}\s+\d{2}\s+\d{2})\b/) ??
+    tail.match(/^(\d{3}\s+\d{2}\s+\d{2}\s+\d{3})\b/);
   if (compact) {
     const d = compact[1]!.replace(/\D/g, "");
     return d.length === 10 ? d : null;
@@ -130,7 +153,7 @@ function nipDigitsAfterLabel(tail: string): string | null {
 
 function extractNips(text: string): string[] {
   const out: string[] = [];
-  const label = /(?:NIP|TAX\s+NUMBER):?\s*/gi;
+  const label = /(?:NIP|TAX\s+NUMBER|VAT\s*(?:ID|No\.?)|Tax\s*ID|Identyfikator\s+podatkowy):?\s*/gi;
   let m: RegExpExecArray | null;
   while ((m = label.exec(text)) !== null) {
     const start = m.index + m[0].length;
@@ -138,14 +161,51 @@ function extractNips(text: string): string[] {
     const d = nipDigitsAfterLabel(tail);
     if (d && !out.includes(d)) out.push(d);
   }
+
+  // Fallback: if labels found fewer than 2 NIPs, scan each line for valid 10-digit NIPs by checksum
+  if (out.length < 2) {
+    const lines = text.split(/\r?\n/);
+    for (const line of lines) {
+      const candidates = line.match(/\d(?:[\d\s\-]*\d){9,}/g) ?? [];
+      for (const candidate of candidates) {
+        const digits = candidate.replace(/\D/g, "");
+        for (let i = 0; i <= digits.length - 10; i++) {
+          const slice = digits.slice(i, i + 10);
+          if (isValidNipChecksum(slice) && !out.includes(slice)) {
+            out.push(slice);
+            if (out.length >= 2) break;
+          }
+        }
+        if (out.length >= 2) break;
+      }
+      if (out.length >= 2) break;
+    }
+  }
+
+  // Ensure document order: sort by first occurrence position in text
+  if (out.length >= 2) {
+    const findNipPosition = (nip: string): number => {
+      // Try plain digits first
+      const plain = text.indexOf(nip);
+      if (plain >= 0) return plain;
+      // Try with separators (dashes/spaces) between digits
+      const re = new RegExp(nip.split("").join("[\\s\\-]?"));
+      const m2 = re.exec(text);
+      return m2 ? m2.index : text.length;
+    };
+    out.sort((a, b) => findNipPosition(a) - findNipPosition(b));
+  }
+
   return out;
 }
 
 /** Match seller/buyer lines: `NIP 123…`, `NIP: 525-10-32-299`, dashed groups, etc. */
 function findNipLineIndex(lines: string[], nip: string): number {
   const want = nip.replace(/\D/g, "");
-  return lines.findIndex((l) => {
-    const label = /(?:NIP|TAX\s+NUMBER):?\s*/gi;
+
+  // Primary: label-based lookup
+  const labelIdx = lines.findIndex((l) => {
+    const label = /(?:NIP|TAX\s+NUMBER|VAT\s*(?:ID|No\.?)|Tax\s*ID|Identyfikator\s+podatkowy):?\s*/gi;
     let mm: RegExpExecArray | null;
     while ((mm = label.exec(l)) !== null) {
       const start = mm.index + mm[0].length;
@@ -153,6 +213,16 @@ function findNipLineIndex(lines: string[], nip: string): number {
       const d = nipDigitsAfterLabel(tail);
       if (d === want) return true;
     }
+    return false;
+  });
+  if (labelIdx >= 0) return labelIdx;
+
+  // Fallback: find a line where the NIP appears as a standalone 10-digit sequence
+  // (not as a substring of a longer number like a bank account)
+  return lines.findIndex((l) => {
+    const digits = l.replace(/\D/g, "");
+    if (digits === want) return true;
+    if (digits.length > 10) return false;
     return false;
   });
 }
@@ -167,10 +237,10 @@ function extractPolishDates(text: string): string[] {
       ordered.push(iso);
     }
   };
-  for (const m of text.matchAll(/\b(\d{4})-(\d{2})-(\d{2})\b/g)) {
+  for (const m of text.matchAll(/\b(\d{4})[-./](\d{2})[-./](\d{2})\b/g)) {
     push(`${m[1]}-${m[2]}-${m[3]}`);
   }
-  for (const m of text.matchAll(/\b(\d{2})-(\d{2})-(\d{4})\b/g)) {
+  for (const m of text.matchAll(/\b(\d{2})[-./](\d{2})[-./](\d{4})\b/g)) {
     push(`${m[3]}-${m[2]}-${m[1]}`);
   }
   return ordered;
@@ -178,10 +248,10 @@ function extractPolishDates(text: string): string[] {
 
 /** Match ISO YYYY-MM-DD or Polish DD-MM-YYYY after a label regex and return ISO. */
 function extractLabeledDateIso(text: string, labelRe: RegExp): string | null {
-  const isoRe = new RegExp(labelRe.source + String.raw`(\d{4})-(\d{2})-(\d{2})`, "i");
+  const isoRe = new RegExp(labelRe.source + String.raw`(\d{4})[-./](\d{2})[-./](\d{2})`, "i");
   const isoM = text.match(isoRe);
   if (isoM?.[1] && isoM[2] && isoM[3]) return `${isoM[1]}-${isoM[2]}-${isoM[3]}`;
-  const plRe = new RegExp(labelRe.source + String.raw`(\d{2})-(\d{2})-(\d{4})`, "i");
+  const plRe = new RegExp(labelRe.source + String.raw`(\d{2})[-./](\d{2})[-./](\d{4})`, "i");
   const plM = text.match(plRe);
   if (plM?.[1] && plM[2] && plM[3]) return `${plM[3]}-${plM[2]}-${plM[1]}`;
   return null;
@@ -410,7 +480,7 @@ function parseVatSummaryAndTotals(text: string) {
     });
   }
 
-  const suma = text.match(/([\d.,]+)\s*zł\.\s*([\d.,]+)\s*zł\.\s*SUMA\s*([\d.,]+)\s*zł\./i);
+  const suma = text.match(/([\d.,]+)\s*(?:zł\.?|PLN)\s*([\d.,]+)\s*(?:zł\.?|PLN)\s*SUMA\s*([\d.,]+)\s*(?:zł\.?|PLN)/i);
   let totals = { net: 0, vat: 0, gross: 0 };
   if (suma) {
     totals = {
@@ -420,12 +490,25 @@ function parseVatSummaryAndTotals(text: string) {
     };
   }
 
+  // Fallback: generic "Razem do zapłaty" / "Kwota do zapłaty" pattern
+  if (!totals.gross) {
+    const genericTotal = text.match(
+      /(?:Razem\s+do\s+zap[łl]aty|Kwota\s+do\s+zap[łl]aty)[\s:]*([\d.,]+)\s*(?:zł\.?|PLN)?/i,
+    );
+    if (genericTotal) {
+      totals.gross = parsePlNumber(genericTotal[1]!);
+    }
+  }
+
   return { vatSummary, totals };
 }
 
 function extractPayment(text: string) {
   const days = text.match(/Termin\s+Płatnosci\s*\(dni\):\s*(\d+)/i);
-  const due = text.match(/Do\s+zapłaty:\s*([\d.,]+)\s*zł\./i) ?? text.match(/Do\s+zapłaty:\s*([\d.,]+)\b/i);
+  const due =
+    text.match(/Do\s+zapłaty:\s*([\d.,]+)\s*(?:zł\.?|PLN)/i) ??
+    text.match(/Do\s+zapłaty:\s*([\d.,]+)\b/i) ??
+    text.match(/(?:Razem\s+do\s+zap[łl]aty|Kwota\s+do\s+zap[łl]aty)[\s:]*([\d.,]+)\s*(?:zł\.?|PLN)?/i);
   const method = text.match(/Forma\s+płatności:\s*\n?\s*([^\n]+)/i) ?? text.match(/Sposób\s+zapłaty:\s*([^\n]+)/i);
   return {
     paymentDays: days ? Number.parseInt(days[1]!, 10) : undefined,
@@ -579,6 +662,10 @@ export function parseInterRiskInvoiceText(rawText: string, options?: ParseInterR
       parseLineItemLine(normalizeFusedPriceQtyRow(fullRow), lp + 1) ??
       parseLineItemLine(fullRow, lp + 1);
     if (item) {
+      if (/^(?:razem|suma|[łl]ącznie|w\s+tym|total)/i.test(item.name)) {
+        pendingNamePrefix = "";
+        continue;
+      }
       lineItems.push(item);
       lp++;
       pendingNamePrefix = "";
@@ -655,6 +742,19 @@ export function parseInterRiskInvoiceText(rawText: string, options?: ParseInterR
     },
     currency: "PLN" as const,
   };
+
+  if (totals.gross > 0) {
+    const calculatedGross = lineItems.reduce((s, i) => s + i.grossAmount, 0);
+    if (Math.abs(calculatedGross - totals.gross) > 0.5) {
+      console.warn("Invoice totals mismatch", {
+        scope: LOG_SCOPE,
+        invoiceNumber,
+        documentGross: totals.gross,
+        calculatedGross,
+        delta: Math.abs(calculatedGross - totals.gross),
+      });
+    }
+  }
 
   const parsed = parsedInvoiceSchema.safeParse(raw);
   if (!parsed.success) {
