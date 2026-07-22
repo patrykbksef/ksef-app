@@ -1,6 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -13,6 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Form,
   FormControl,
@@ -24,7 +26,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
-import { loginSchema, signupSchema, type LoginInput } from "@/lib/validations/auth";
+import {
+  loginSchema,
+  signupSchema,
+  type LoginInput,
+  type SignupInput,
+} from "@/lib/validations/auth";
+
+type AuthFormValues = LoginInput & Partial<SignupInput>;
 
 export function LoginForm() {
   const router = useRouter();
@@ -33,19 +42,31 @@ export function LoginForm() {
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [error, setError] = useState<string | null>(null);
 
-  const form = useForm<LoginInput>({
-    resolver: zodResolver(mode === "login" ? loginSchema : signupSchema),
-    defaultValues: { email: "", password: "" },
+  const form = useForm<AuthFormValues>({
+    resolver: (values, context, options) =>
+      zodResolver(mode === "login" ? loginSchema : signupSchema)(
+        values,
+        context,
+        options,
+      ),
+    defaultValues: {
+      email: "",
+      password: "",
+      acceptTerms: false,
+      acceptPrivacy: false,
+      acceptDpa: false,
+    },
   });
 
-  async function onSubmit(values: LoginInput) {
+  async function onSubmit(values: AuthFormValues) {
     setError(null);
     const supabase = createClient();
 
     if (mode === "signup") {
+      const signupValues = values as SignupInput;
       const { error: signErr } = await supabase.auth.signUp({
-        email: values.email,
-        password: values.password,
+        email: signupValues.email,
+        password: signupValues.password,
         options: {
           emailRedirectTo: `${window.location.origin}/auth/confirm`,
         },
@@ -137,8 +158,99 @@ export function LoginForm() {
                 </FormItem>
               )}
             />
+            {mode === "signup" ? (
+              <div className="space-y-3 border-t pt-3">
+                <FormField
+                  control={form.control}
+                  name="acceptTerms"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-row items-start gap-3 space-y-0">
+                      <FormControl>
+                        <Checkbox
+                          checked={field.value === true}
+                          onCheckedChange={(checked) =>
+                            field.onChange(checked === true)
+                          }
+                        />
+                      </FormControl>
+                      <div className="space-y-1 leading-none">
+                        <FormLabel className="font-normal">
+                          Akceptuję{" "}
+                          <Link
+                            href="/regulamin"
+                            target="_blank"
+                            className="underline underline-offset-2"
+                          >
+                            Regulamin
+                          </Link>
+                        </FormLabel>
+                        <FormMessage />
+                      </div>
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="acceptPrivacy"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-row items-start gap-3 space-y-0">
+                      <FormControl>
+                        <Checkbox
+                          checked={field.value === true}
+                          onCheckedChange={(checked) =>
+                            field.onChange(checked === true)
+                          }
+                        />
+                      </FormControl>
+                      <div className="space-y-1 leading-none">
+                        <FormLabel className="font-normal">
+                          Akceptuję{" "}
+                          <Link
+                            href="/polityka-prywatnosci"
+                            target="_blank"
+                            className="underline underline-offset-2"
+                          >
+                            Politykę prywatności
+                          </Link>
+                        </FormLabel>
+                        <FormMessage />
+                      </div>
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="acceptDpa"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-row items-start gap-3 space-y-0">
+                      <FormControl>
+                        <Checkbox
+                          checked={field.value === true}
+                          onCheckedChange={(checked) =>
+                            field.onChange(checked === true)
+                          }
+                        />
+                      </FormControl>
+                      <div className="space-y-1 leading-none">
+                        <FormLabel className="font-normal">
+                          Zawieram{" "}
+                          <Link
+                            href="/umowa-powierzenia"
+                            target="_blank"
+                            className="underline underline-offset-2"
+                          >
+                            Umowę powierzenia przetwarzania danych
+                          </Link>
+                        </FormLabel>
+                        <FormMessage />
+                      </div>
+                    </FormItem>
+                  )}
+                />
+              </div>
+            ) : null}
           </CardContent>
-          <CardFooter className="flex flex-col gap-3 mt-4">
+          <CardFooter className="mt-4 flex flex-col gap-3">
             <Button
               type="submit"
               className="w-full"
@@ -162,12 +274,34 @@ export function LoginForm() {
               onClick={() => {
                 setMode(mode === "login" ? "signup" : "login");
                 form.clearErrors();
+                form.setValue("acceptTerms", false);
+                form.setValue("acceptPrivacy", false);
+                form.setValue("acceptDpa", false);
               }}
             >
               {mode === "login"
                 ? "Nie masz konta? Zarejestruj się"
                 : "Masz już konto? Zaloguj się"}
             </button>
+            <p className="text-muted-foreground text-center text-xs">
+              <Link href="/regulamin" className="underline underline-offset-2">
+                Regulamin
+              </Link>
+              {" · "}
+              <Link
+                href="/polityka-prywatnosci"
+                className="underline underline-offset-2"
+              >
+                Polityka prywatności
+              </Link>
+              {" · "}
+              <Link
+                href="/umowa-powierzenia"
+                className="underline underline-offset-2"
+              >
+                Umowa powierzenia
+              </Link>
+            </p>
           </CardFooter>
         </form>
       </Form>

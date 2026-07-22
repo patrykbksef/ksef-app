@@ -1,4 +1,4 @@
-import type { ParsedInvoice } from "@/lib/validations/invoice";
+import type { PartialParsedInvoice } from "@/lib/validations/invoice";
 
 /** Same key as „Tekst prefiksu” on the invoice edit page (localStorage). */
 export const REMARKS_PREFIX_TEXT_LS_KEY = "ksef-invoice-remarks-prefix-text";
@@ -44,11 +44,11 @@ export function parseRemarksLookupPrefixFromFormData(
 }
 
 /** If `parsed.remarks` is empty and a token is found, set `remarks` to the token. */
-export function mergeRemarksFromPdfLookup(
-  parsed: ParsedInvoice,
+export function mergeRemarksFromPdfLookup<T extends PartialParsedInvoice>(
+  parsed: T,
   pdfText: string,
   prefix: string | null,
-): ParsedInvoice {
+): T {
   if (!prefix || parsed.remarks?.trim()) return parsed;
   const token = findRemarksTokenByPrefix(pdfText, prefix);
   if (!token) return parsed;

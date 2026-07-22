@@ -1,6 +1,17 @@
-import { parsedInvoiceSchema, type ParsedInvoice } from "@/lib/validations/invoice";
+import {
+  parsedInvoiceSchema,
+  partialParsedInvoiceSchema,
+  type ParsedInvoice,
+  type PartialParsedInvoice,
+} from "@/lib/validations/invoice";
 import { isValidNipChecksum } from "@/lib/validations/profile";
 import { mergeLeadingNameLinesFromAddress } from "@/lib/invoice/party-name-address";
+
+export type LenientParseResult = {
+  invoice: PartialParsedInvoice;
+  complete: boolean;
+  missingFields: string[];
+};
 
 const LOG_SCOPE = "invoice.parser";
 
@@ -540,161 +551,149 @@ export type ParseInterRiskInvoiceTextOptions = {
 };
 
 /**
- * Parse plain text extracted from InterRisk-style PDF invoices.
+ * Lenient parse — extracts as many fields as possible without throwing.
+ * Returns which fields are missing so the caller can decide whether to
+ * proceed with a partial result or require manual completion.
  */
-export function parseInterRiskInvoiceText(rawText: string, options?: ParseInterRiskInvoiceTextOptions): ParsedInvoice {
+export function parseInterRiskInvoiceTextLenient(
+  rawText: string,
+  options?: ParseInterRiskInvoiceTextOptions,
+): LenientParseResult {
   const issuerName = options?.issuerName?.trim();
   const text = rawText.replace(/\u00a0/g, " ");
   const lineCount = text.split(/\r?\n/).length;
+  const missingFields: string[] = [];
 
-  const invoiceNumber = extractInvoiceNumber(text);
+  const invoiceNumber = extractInvoiceNumber(text) ?? "";
   if (!invoiceNumber) {
-    console.error("Invoice parse failed: missing invoice number", {
+    console.warn("Invoice parse: missing invoice number", {
       scope: LOG_SCOPE,
       phase: "header",
-      reason: "missing_invoice_number",
       lineCount,
       textPreview: truncatePreview(text),
     });
-    throw new Error("Nie znaleziono numeru faktury (np. „FAKTURA VAT NR …”, „Faktura nr …”)");
+    missingFields.push("invoiceNumber");
   }
 
   const nips = extractNips(text);
+  const sellerNip = nips[0] ?? "";
+  const buyerNip = nips[1] ?? "";
+  if (!sellerNip) missingFields.push("seller.nip");
+  if (!buyerNip) missingFields.push("buyer.nip");
   if (nips.length < 2) {
-    console.error("Invoice parse failed: NIP count", {
+    console.warn("Invoice parse: insufficient NIPs", {
       scope: LOG_SCOPE,
       phase: "parties",
-      reason: "insufficient_nips",
       nipCount: nips.length,
       lineCount,
-      textPreview: truncatePreview(text),
     });
-    throw new Error("Nie znaleziono NIP sprzedawcy i nabywcy");
   }
-  const sellerNip = nips[0]!;
-  const buyerNip = nips[1]!;
 
   const { issueDate, saleDate } = extractIssueAndSaleDates(text);
+  if (!issueDate) missingFields.push("issueDate");
+  if (!saleDate) missingFields.push("saleDate");
 
   const lines = text.split(/\r?\n/).map((l) => l.trim());
-  const nipSellerIdx = findNipLineIndex(lines, sellerNip);
-  const nipBuyerIdx = findNipLineIndex(lines, buyerNip);
 
-  const sprzedawcaHeaderIdx = lines.findIndex((l) => /Sprzedawca.*Nabywca/i.test(l));
+  let sellerParty = { name: "", addressLines: [] as string[] };
+  let buyerParty = { name: "", addressLines: [] as string[] };
 
-  let sellerLinesRaw = nipSellerIdx > 0 ? lines.slice(1, nipSellerIdx).filter(Boolean) : [];
-  let buyerLinesRaw = nipBuyerIdx > nipSellerIdx + 1 ? lines.slice(nipSellerIdx + 1, nipBuyerIdx).filter(Boolean) : [];
+  if (sellerNip && buyerNip) {
+    const nipSellerIdx = findNipLineIndex(lines, sellerNip);
+    const nipBuyerIdx = findNipLineIndex(lines, buyerNip);
+    const sprzedawcaHeaderIdx = lines.findIndex((l) => /Sprzedawca.*Nabywca/i.test(l));
 
-  const usedEuropPartySplit =
-    sprzedawcaHeaderIdx >= 0 && nipSellerIdx === nipBuyerIdx && nipSellerIdx > sprzedawcaHeaderIdx;
+    let sellerLinesRaw = nipSellerIdx > 0 ? lines.slice(1, nipSellerIdx).filter(Boolean) : [];
+    let buyerLinesRaw =
+      nipBuyerIdx > nipSellerIdx + 1 ? lines.slice(nipSellerIdx + 1, nipBuyerIdx).filter(Boolean) : [];
 
-  if (usedEuropPartySplit) {
-    const block = lines.slice(sprzedawcaHeaderIdx + 1, nipSellerIdx).filter(Boolean);
-    const split = splitEuropAssistanceTwoColumnParties(block, issuerName || undefined);
-    sellerLinesRaw = split.sellerLines;
-    buyerLinesRaw = split.buyerLines;
+    const usedEuropPartySplit =
+      sprzedawcaHeaderIdx >= 0 && nipSellerIdx === nipBuyerIdx && nipSellerIdx > sprzedawcaHeaderIdx;
+
+    if (usedEuropPartySplit) {
+      const block = lines.slice(sprzedawcaHeaderIdx + 1, nipSellerIdx).filter(Boolean);
+      const split = splitEuropAssistanceTwoColumnParties(block, issuerName || undefined);
+      sellerLinesRaw = split.sellerLines;
+      buyerLinesRaw = split.buyerLines;
+    }
+
+    const sellerLines = normalizeInterRiskPartyLines(sellerLinesRaw);
+    const buyerLines = normalizeInterRiskPartyLines(buyerLinesRaw);
+    sellerParty = usedEuropPartySplit
+      ? { name: sellerLines[0] ?? "", addressLines: sellerLines.slice(1).filter(Boolean) }
+      : mergeLeadingNameLinesFromAddress({ name: sellerLines[0] ?? "", addressLines: sellerLines.slice(1) });
+    buyerParty = usedEuropPartySplit
+      ? { name: buyerLines[0] ?? "", addressLines: buyerLines.slice(1).filter(Boolean) }
+      : mergeLeadingNameLinesFromAddress({ name: buyerLines[0] ?? "", addressLines: buyerLines.slice(1) });
   }
-
-  const sellerLines = normalizeInterRiskPartyLines(sellerLinesRaw);
-  const buyerLines = normalizeInterRiskPartyLines(buyerLinesRaw);
-  const sellerParty = usedEuropPartySplit
-    ? {
-        name: sellerLines[0] ?? "",
-        addressLines: sellerLines.slice(1).filter(Boolean),
-      }
-    : mergeLeadingNameLinesFromAddress({
-        name: sellerLines[0] ?? "",
-        addressLines: sellerLines.slice(1),
-      });
-  const buyerParty = usedEuropPartySplit
-    ? {
-        name: buyerLines[0] ?? "",
-        addressLines: buyerLines.slice(1).filter(Boolean),
-      }
-    : mergeLeadingNameLinesFromAddress({
-        name: buyerLines[0] ?? "",
-        addressLines: buyerLines.slice(1),
-      });
+  if (!sellerParty.name) missingFields.push("seller.name");
+  if (!buyerParty.name) missingFields.push("buyer.name");
 
   const itemsStart = lines.findIndex(
     (l) =>
       l.includes("Nazwa usługi") || l.includes("Nazwa us") || /Nazwa\s+towaru/i.test(l) || /L\.p\.\s+Nazwa/i.test(l),
   );
-  let itemsEnd = lines.findIndex(
-    (l, i) => i > itemsStart && (/^\d+(?:[.,]\d+)?%\s/.test(l) || /^Razem\s*:/i.test(l) || /^w\s+tym\s*:/i.test(l)),
-  );
-  if (itemsStart < 0) {
-    console.error("Invoice parse failed: line items section not found", {
-      scope: LOG_SCOPE,
-      phase: "lineItems",
-      reason: "missing_nazwa_uslugi_marker",
-      lineCount: lines.length,
-      textPreview: truncatePreview(text),
-    });
-    throw new Error("Nie znaleziono sekcji pozycji faktury");
-  }
-  if (itemsEnd < 0) itemsEnd = lines.length;
-
-  let dataStart = itemsStart + 1;
-  const itemsHeaderLine = lines[itemsStart] ?? "";
-  if (/L\.p\.\s+Nazwa/i.test(itemsHeaderLine)) {
-    while (dataStart < lines.length && dataStart < (itemsEnd > 0 ? itemsEnd : lines.length)) {
-      const l = lines[dataStart]!;
-      if (/^\d+\s+\D/u.test(l)) break;
-      if (/^Razem\s*:/i.test(l)) break;
-      dataStart++;
-    }
-  }
 
   const lineItems: NonNullable<ReturnType<typeof parseLineItemLine>>[] = [];
-  let lp = 0;
-  let pendingNamePrefix = "";
-  for (let i = dataStart; i < itemsEnd; i++) {
-    const row = lines[i]!;
-    if (!row || row.startsWith("SPRZEDAWCA")) {
-      pendingNamePrefix = "";
-      continue;
+
+  if (itemsStart >= 0) {
+    let itemsEnd = lines.findIndex(
+      (l, i) => i > itemsStart && (/^\d+(?:[.,]\d+)?%\s/.test(l) || /^Razem\s*:/i.test(l) || /^w\s+tym\s*:/i.test(l)),
+    );
+    if (itemsEnd < 0) itemsEnd = lines.length;
+
+    let dataStart = itemsStart + 1;
+    const itemsHeaderLine = lines[itemsStart] ?? "";
+    if (/L\.p\.\s+Nazwa/i.test(itemsHeaderLine)) {
+      while (dataStart < lines.length && dataStart < (itemsEnd > 0 ? itemsEnd : lines.length)) {
+        const l = lines[dataStart]!;
+        if (/^\d+\s+\D/u.test(l)) break;
+        if (/^Razem\s*:/i.test(l)) break;
+        dataStart++;
+      }
     }
-    const fullRow = pendingNamePrefix ? `${pendingNamePrefix} ${row}` : row;
-    const item =
-      parseInterRiskTableRow(fullRow, lp + 1) ??
-      parseEuropAssistanceTotalsRow(fullRow, lp + 1) ??
-      parseLineItemLine(normalizeFusedPriceQtyRow(fullRow), lp + 1) ??
-      parseLineItemLine(fullRow, lp + 1);
-    if (item) {
-      if (/^(?:razem|suma|[łl]ącznie|w\s+tym|total)/i.test(item.name)) {
+
+    let lp = 0;
+    let pendingNamePrefix = "";
+    for (let i = dataStart; i < itemsEnd; i++) {
+      const row = lines[i]!;
+      if (!row || row.startsWith("SPRZEDAWCA")) {
         pendingNamePrefix = "";
         continue;
       }
-      lineItems.push(item);
-      lp++;
-      pendingNamePrefix = "";
-    } else {
-      pendingNamePrefix = fullRow;
+      const fullRow = pendingNamePrefix ? `${pendingNamePrefix} ${row}` : row;
+      const item =
+        parseInterRiskTableRow(fullRow, lp + 1) ??
+        parseEuropAssistanceTotalsRow(fullRow, lp + 1) ??
+        parseLineItemLine(normalizeFusedPriceQtyRow(fullRow), lp + 1) ??
+        parseLineItemLine(fullRow, lp + 1);
+      if (item) {
+        if (/^(?:razem|suma|[łl]ącznie|w\s+tym|total)/i.test(item.name)) {
+          pendingNamePrefix = "";
+          continue;
+        }
+        lineItems.push(item);
+        lp++;
+        pendingNamePrefix = "";
+      } else {
+        pendingNamePrefix = fullRow;
+      }
     }
   }
 
   if (lineItems.length === 0) {
-    const sampleRows = lines
-      .slice(itemsStart + 1, Math.min(itemsEnd, itemsStart + 5))
-      .map((r) => truncatePreview(r, 200));
-    console.error("Invoice parse failed: no line items", {
+    console.warn("Invoice parse: no line items found", {
       scope: LOG_SCOPE,
       phase: "lineItems",
-      reason: "zero_parsed_rows",
-      itemsStart,
-      itemsEnd,
-      linesBetween: Math.max(0, itemsEnd - itemsStart - 1),
       lineCount: lines.length,
-      sampleRows,
     });
-    throw new Error("Nie udało się odczytać pozycji — sprawdź układ tekstu w PDF");
+    missingFields.push("lineItems");
   }
 
   const { vatSummary: vatFromDoc, totals } = parseVatSummaryAndTotals(text);
   const pay = extractPayment(text);
   const ref = extractReference(text);
-  const bank = extractBank(text, buyerNip);
+  const bank = buyerNip ? extractBank(text, buyerNip) : {};
 
   const vatSummaryFromLines = (): ParsedInvoice["vatSummary"] => {
     const map = new Map<number, { net: number; vat: number; gross: number }>();
@@ -720,12 +719,12 @@ export function parseInterRiskInvoiceText(rawText: string, options?: ParseInterR
     issueDate,
     saleDate,
     seller: {
-      name: sellerParty.name || "Nieznany sprzedawca",
+      name: sellerParty.name,
       addressLines: sellerParty.addressLines,
       nip: sellerNip,
     },
     buyer: {
-      name: buyerParty.name || "Nieznany nabywca",
+      name: buyerParty.name,
       addressLines: buyerParty.addressLines,
       nip: buyerNip,
     },
@@ -743,7 +742,7 @@ export function parseInterRiskInvoiceText(rawText: string, options?: ParseInterR
     currency: "PLN" as const,
   };
 
-  if (totals.gross > 0) {
+  if (totals.gross > 0 && lineItems.length > 0) {
     const calculatedGross = lineItems.reduce((s, i) => s + i.grossAmount, 0);
     if (Math.abs(calculatedGross - totals.gross) > 0.5) {
       console.warn("Invoice totals mismatch", {
@@ -756,16 +755,33 @@ export function parseInterRiskInvoiceText(rawText: string, options?: ParseInterR
     }
   }
 
-  const parsed = parsedInvoiceSchema.safeParse(raw);
+  const parsed = partialParsedInvoiceSchema.safeParse(raw);
   if (!parsed.success) {
-    console.error("Invoice parse failed: Zod validation", {
+    console.error("Invoice parse failed: partial schema validation", {
       scope: LOG_SCOPE,
       phase: "validate",
-      reason: "parsed_invoice_schema",
       zodMessage: parsed.error.message,
-      lineItemCount: lineItems.length,
     });
     throw new Error(`Walidacja sparsowanej faktury nie powiodła się: ${parsed.error.message}`);
   }
-  return parsed.data;
+
+  const complete = missingFields.length === 0 && parsedInvoiceSchema.safeParse(parsed.data).success;
+
+  return { invoice: parsed.data, complete, missingFields };
+}
+
+/**
+ * Parse plain text extracted from InterRisk-style PDF invoices.
+ * Throws on any missing required field — use
+ * {@link parseInterRiskInvoiceTextLenient} when partial results are acceptable.
+ */
+export function parseInterRiskInvoiceText(rawText: string, options?: ParseInterRiskInvoiceTextOptions): ParsedInvoice {
+  const { invoice, complete, missingFields } = parseInterRiskInvoiceTextLenient(rawText, options);
+  if (!complete) {
+    const msg = missingFields.length > 0
+      ? `Brakuje pól: ${missingFields.join(", ")}`
+      : "Walidacja sparsowanej faktury nie powiodła się";
+    throw new Error(msg);
+  }
+  return invoice as ParsedInvoice;
 }

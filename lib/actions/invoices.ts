@@ -3,43 +3,25 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import {
-  buildFa3XmlFromParsedInvoice,
-  buildFa3XmlOptionsFromProfile,
-} from "@/lib/invoice/xml-builder";
-import {
-  AiProvidersExhaustedError,
-  parseInvoiceWithAi,
-} from "@/lib/invoice/ai-parser";
+import { buildFa3XmlFromParsedInvoice, buildFa3XmlOptionsFromProfile } from "@/lib/invoice/xml-builder";
+import { AiProvidersExhaustedError, parseInvoiceWithAi } from "@/lib/invoice/ai-parser";
 import { azureDocumentIntelligenceConfigured } from "@/lib/invoice/azure-document-intelligence";
 import { parseInvoiceWithAzureDi } from "@/lib/invoice/parse-invoice-azure-di";
-import { parseInterRiskInvoiceText } from "@/lib/invoice/parser";
+import { parseInterRiskInvoiceTextLenient } from "@/lib/invoice/parser";
 import { extractTextFromPdfBuffer } from "@/lib/invoice/pdf-text";
-import {
-  mergeRemarksFromPdfLookup,
-  parseRemarksLookupPrefixFromFormData,
-} from "@/lib/invoice/remarks-lookup-from-pdf";
+import { mergeRemarksFromPdfLookup, parseRemarksLookupPrefixFromFormData } from "@/lib/invoice/remarks-lookup-from-pdf";
 import { sendInvoiceToKsefWithToken } from "@/lib/ksef/client";
 import { resolveKsefEnvironment } from "@/lib/ksef/config";
 import { recalcParsedInvoice } from "@/lib/invoice/recalc-parsed-invoice";
-import {
-  fileUploadSchema,
-  parsedInvoiceSchema,
-} from "@/lib/validations/invoice";
+import { fileUploadSchema, parsedInvoiceSchema, type ParsedInvoice } from "@/lib/validations/invoice";
 import { z } from "zod";
-import {
-  ksefTokenForProfile,
-  profileRowSchema,
-} from "@/lib/validations/profile";
+import { ksefTokenForProfile, profileRowSchema } from "@/lib/validations/profile";
 
 export type UploadInvoiceState = {
   error?: string;
 };
 
-export async function uploadInvoice(
-  _prev: UploadInvoiceState,
-  formData: FormData,
-): Promise<UploadInvoiceState> {
+export async function uploadInvoice(_prev: UploadInvoiceState, formData: FormData): Promise<UploadInvoiceState> {
   const file = formData.get("file");
   if (!(file instanceof File)) {
     return { error: "Nie wybrano pliku" };
@@ -66,15 +48,9 @@ export async function uploadInvoice(
     return { error: "Brak sesji — zaloguj się ponownie" };
   }
 
-  const { data: profileRaw } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .maybeSingle();
+  const { data: profileRaw } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
 
-  const profileParsed = profileRaw
-    ? profileRowSchema.safeParse(profileRaw)
-    : null;
+  const profileParsed = profileRaw ? profileRowSchema.safeParse(profileRaw) : null;
   if (!profileParsed?.success) {
     return {
       error: "Najpierw uzupełnij profil w Ustawieniach",
@@ -107,9 +83,9 @@ export async function uploadInvoice(
     return { error: "Nie udało się odczytać pliku PDF" };
   }
 
-  let parsedInvoice;
+  let lenientResult;
   try {
-    parsedInvoice = parseInterRiskInvoiceText(text, {
+    lenientResult = parseInterRiskInvoiceTextLenient(text, {
       issuerName: profile.issuer_name?.trim(),
     });
   } catch (e) {
@@ -123,70 +99,63 @@ export async function uploadInvoice(
       errorMessage,
     });
     return {
-      error:
-        e instanceof Error
-          ? e.message
-          : "Nie udało się sparsować faktury z PDF",
+      error: e instanceof Error ? e.message : "Nie udało się sparsować faktury z PDF",
     };
   }
 
-  parsedInvoice = mergeRemarksFromPdfLookup(
-    parsedInvoice,
-    text,
-    parseRemarksLookupPrefixFromFormData(formData),
-  );
+  let parsedInvoice = lenientResult.invoice;
 
-  let xml: string;
-  try {
-    xml = buildFa3XmlFromParsedInvoice(parsedInvoice, xmlOptions);
-  } catch (e) {
-    const errorMessage = e instanceof Error ? e.message : String(e);
-    console.error("Invoice upload: XML build failed", {
-      scope: "invoice.upload",
-      userId: user.id,
-      fileName: file.name,
-      fileSize: file.size,
-      step: "xml",
-      errorMessage,
-    });
-    return {
-      error:
-        e instanceof Error
-          ? e.message
-          : "Nie udało się zbudować XML KSeF z faktury",
-    };
-  }
+  parsedInvoice = mergeRemarksFromPdfLookup(parsedInvoice, text, parseRemarksLookupPrefixFromFormData(formData));
 
-  const autoSend = profile.auto_send === true;
-
+  let xml: string | null = null;
   let status: "pending_review" | "success" | "error" = "pending_review";
   let ksefRef: string | null = null;
   let errMsg: string | null = null;
 
-  if (autoSend) {
+  if (lenientResult.complete) {
     try {
-      const result = await sendInvoiceToKsefWithToken({
-        contextNip: xmlOptions.issuerNip,
-        ksefToken: ksefTokenForProfile(profile)!,
-        invoiceXml: xml,
-        ksefEnvironment: resolveKsefEnvironment(profile.ksef_environment),
-      });
-      ksefRef =
-        result.invoiceKsefNumber ?? result.invoiceReferenceNumber ?? null;
-      status = "success";
+      xml = buildFa3XmlFromParsedInvoice(parsedInvoice as ParsedInvoice, xmlOptions);
     } catch (e) {
-      status = "error";
-      errMsg = e instanceof Error ? e.message : String(e);
-      console.error("Invoice upload: KSeF send failed", {
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      console.error("Invoice upload: XML build failed", {
         scope: "invoice.upload",
         userId: user.id,
         fileName: file.name,
         fileSize: file.size,
-        step: "ksef",
-        errorMessage: errMsg,
-        xmlLength: xml.length,
-        xmlHead: xml.slice(0, 2000),
+        step: "xml",
+        errorMessage,
       });
+      return {
+        error: e instanceof Error ? e.message : "Nie udało się zbudować XML KSeF z faktury",
+      };
+    }
+
+    const autoSend = profile.auto_send === true;
+
+    if (autoSend) {
+      try {
+        const result = await sendInvoiceToKsefWithToken({
+          contextNip: xmlOptions.issuerNip,
+          ksefToken: ksefTokenForProfile(profile)!,
+          invoiceXml: xml,
+          ksefEnvironment: resolveKsefEnvironment(profile.ksef_environment),
+        });
+        ksefRef = result.invoiceKsefNumber ?? result.invoiceReferenceNumber ?? null;
+        status = "success";
+      } catch (e) {
+        status = "error";
+        errMsg = e instanceof Error ? e.message : String(e);
+        console.error("Invoice upload: KSeF send failed", {
+          scope: "invoice.upload",
+          userId: user.id,
+          fileName: file.name,
+          fileSize: file.size,
+          step: "ksef",
+          errorMessage: errMsg,
+          xmlLength: xml.length,
+          xmlHead: xml.slice(0, 2000),
+        });
+      }
     }
   }
 
@@ -221,10 +190,7 @@ export async function uploadInvoice(
 }
 
 /** Same as {@link uploadInvoice} but parses the PDF with Gemini AI (any layout). */
-export async function uploadInvoiceAi(
-  _prev: UploadInvoiceState,
-  formData: FormData,
-): Promise<UploadInvoiceState> {
+export async function uploadInvoiceAi(_prev: UploadInvoiceState, formData: FormData): Promise<UploadInvoiceState> {
   const file = formData.get("file");
   if (!(file instanceof File)) {
     return { error: "Nie wybrano pliku" };
@@ -251,15 +217,9 @@ export async function uploadInvoiceAi(
     return { error: "Brak sesji — zaloguj się ponownie" };
   }
 
-  const { data: profileRaw } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .maybeSingle();
+  const { data: profileRaw } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
 
-  const profileParsed = profileRaw
-    ? profileRowSchema.safeParse(profileRaw)
-    : null;
+  const profileParsed = profileRaw ? profileRowSchema.safeParse(profileRaw) : null;
   if (!profileParsed?.success) {
     return {
       error: "Najpierw uzupełnij profil w Ustawieniach",
@@ -308,10 +268,7 @@ export async function uploadInvoiceAi(
       return { error: e.userMessage };
     }
     return {
-      error:
-        e instanceof Error
-          ? e.message
-          : "Nie udało się sparsować faktury z PDF (AI)",
+      error: e instanceof Error ? e.message : "Nie udało się sparsować faktury z PDF (AI)",
     };
   }
 
@@ -341,10 +298,7 @@ export async function uploadInvoiceAi(
       errorMessage,
     });
     return {
-      error:
-        e instanceof Error
-          ? e.message
-          : "Nie udało się zbudować XML KSeF z faktury",
+      error: e instanceof Error ? e.message : "Nie udało się zbudować XML KSeF z faktury",
     };
   }
 
@@ -362,8 +316,7 @@ export async function uploadInvoiceAi(
         invoiceXml: xml,
         ksefEnvironment: resolveKsefEnvironment(profile.ksef_environment),
       });
-      ksefRef =
-        result.invoiceKsefNumber ?? result.invoiceReferenceNumber ?? null;
+      ksefRef = result.invoiceKsefNumber ?? result.invoiceReferenceNumber ?? null;
       status = "success";
     } catch (e) {
       status = "error";
@@ -413,10 +366,7 @@ export async function uploadInvoiceAi(
 }
 
 /** Same flow as {@link uploadInvoiceAi} but parses with Azure Document Intelligence + code mapping (no LLM). */
-export async function uploadInvoiceAzureDi(
-  _prev: UploadInvoiceState,
-  formData: FormData,
-): Promise<UploadInvoiceState> {
+export async function uploadInvoiceAzureDi(_prev: UploadInvoiceState, formData: FormData): Promise<UploadInvoiceState> {
   const file = formData.get("file");
   if (!(file instanceof File)) {
     return { error: "Nie wybrano pliku" };
@@ -435,8 +385,7 @@ export async function uploadInvoiceAzureDi(
 
   if (!azureDocumentIntelligenceConfigured()) {
     return {
-      error:
-        "Brak AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT i AZURE_DOCUMENT_INTELLIGENCE_KEY w zmiennych środowiska.",
+      error: "Brak AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT i AZURE_DOCUMENT_INTELLIGENCE_KEY w zmiennych środowiska.",
     };
   }
 
@@ -450,15 +399,9 @@ export async function uploadInvoiceAzureDi(
     return { error: "Brak sesji — zaloguj się ponownie" };
   }
 
-  const { data: profileRaw } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .maybeSingle();
+  const { data: profileRaw } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
 
-  const profileParsed = profileRaw
-    ? profileRowSchema.safeParse(profileRaw)
-    : null;
+  const profileParsed = profileRaw ? profileRowSchema.safeParse(profileRaw) : null;
   if (!profileParsed?.success) {
     return {
       error: "Najpierw uzupełnij profil w Ustawieniach",
@@ -504,10 +447,7 @@ export async function uploadInvoiceAzureDi(
       errorMessage,
     });
     return {
-      error:
-        e instanceof Error
-          ? e.message
-          : "Nie udało się sparsować faktury z PDF (Azure Document Intelligence)",
+      error: e instanceof Error ? e.message : "Nie udało się sparsować faktury z PDF (Azure Document Intelligence)",
     };
   }
 
@@ -537,10 +477,7 @@ export async function uploadInvoiceAzureDi(
       errorMessage,
     });
     return {
-      error:
-        e instanceof Error
-          ? e.message
-          : "Nie udało się zbudować XML KSeF z faktury",
+      error: e instanceof Error ? e.message : "Nie udało się zbudować XML KSeF z faktury",
     };
   }
 
@@ -558,8 +495,7 @@ export async function uploadInvoiceAzureDi(
         invoiceXml: xml,
         ksefEnvironment: resolveKsefEnvironment(profile.ksef_environment),
       });
-      ksefRef =
-        result.invoiceKsefNumber ?? result.invoiceReferenceNumber ?? null;
+      ksefRef = result.invoiceKsefNumber ?? result.invoiceReferenceNumber ?? null;
       status = "success";
     } catch (e) {
       status = "error";
@@ -634,8 +570,7 @@ export async function saveInvoiceParsedData(
   const first = parsedInvoiceSchema.safeParse(unknown);
   if (!first.success) {
     return {
-      error:
-        first.error.issues[0]?.message ?? "Dane faktury nie przeszły walidacji",
+      error: first.error.issues[0]?.message ?? "Dane faktury nie przeszły walidacji",
     };
   }
 
@@ -681,10 +616,7 @@ export type SendInvoiceState = {
   ok?: boolean;
 };
 
-export async function sendInvoiceToKsef(
-  _prev: SendInvoiceState,
-  formData: FormData,
-): Promise<SendInvoiceState> {
+export async function sendInvoiceToKsef(_prev: SendInvoiceState, formData: FormData): Promise<SendInvoiceState> {
   const idRaw = String(formData.get("invoice_id") ?? "");
   const idParsed = z.string().uuid().safeParse(idRaw);
   if (!idParsed.success) {
@@ -701,16 +633,10 @@ export async function sendInvoiceToKsef(
     return { error: "Brak sesji — zaloguj się ponownie" };
   }
 
-  const { data: profileRaw } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .maybeSingle();
+  const { data: profileRaw } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
 
   const prof = profileRaw ? profileRowSchema.safeParse(profileRaw) : null;
-  const xmlOptions = prof?.success
-    ? buildFa3XmlOptionsFromProfile(prof.data)
-    : null;
+  const xmlOptions = prof?.success ? buildFa3XmlOptionsFromProfile(prof.data) : null;
   if (!prof?.success || !xmlOptions) {
     return {
       error:
@@ -749,8 +675,7 @@ export async function sendInvoiceToKsef(
       invoiceXml: xml,
       ksefEnvironment: resolveKsefEnvironment(prof.data.ksef_environment),
     });
-    const ksefRef =
-      result.invoiceKsefNumber ?? result.invoiceReferenceNumber ?? null;
+    const ksefRef = result.invoiceKsefNumber ?? result.invoiceReferenceNumber ?? null;
 
     await supabase
       .from("invoices")

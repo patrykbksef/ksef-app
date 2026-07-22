@@ -1,5 +1,5 @@
 import { KSefInvoiceGenerator } from "ksef-lite";
-import type { ParsedInvoice } from "@/lib/validations/invoice";
+import type { ParsedInvoice, PartialParsedInvoice } from "@/lib/validations/invoice";
 import type { ProfileRow } from "@/lib/validations/profile";
 import { profileReadyForKsefXml } from "@/lib/validations/profile";
 import { mergeLeadingNameLinesFromAddress } from "@/lib/invoice/party-name-address";
@@ -38,7 +38,7 @@ function normalizeNip(n: string): string {
 /**
  * Party on the PDF whose NIP matches the profile (Podmiot1 / Ty w KSeF).
  */
-export function issuerPartyFromParsed(data: ParsedInvoice, issuerNip: string): "seller" | "buyer" | null {
+export function issuerPartyFromParsed(data: PartialParsedInvoice, issuerNip: string): "seller" | "buyer" | null {
   const p = normalizeNip(issuerNip);
   if (p.length !== 10) return null;
   if (p === normalizeNip(data.seller.nip)) return "seller";
@@ -51,7 +51,7 @@ export function issuerPartyFromParsed(data: ParsedInvoice, issuerNip: string): "
  * Zależy od tego, czy Twój NIP z profilu jest u sprzedawcy czy u nabywcy na PDF.
  */
 export function podmiot2CounterpartyFromParsed(
-  data: ParsedInvoice,
+  data: PartialParsedInvoice,
   issuerNip: string,
 ): { nip: string; name: string; addressLines: string[] } {
   const side = issuerPartyFromParsed(data, issuerNip);

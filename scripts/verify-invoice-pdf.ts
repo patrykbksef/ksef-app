@@ -6,6 +6,7 @@ import { extractTextFromPdfBuffer } from "../lib/invoice/pdf-text";
 import {
   extractInvoiceNumber,
   parseInterRiskInvoiceText,
+  parseInterRiskInvoiceTextLenient,
 } from "../lib/invoice/parser";
 import { findRemarksTokenByPrefix } from "../lib/invoice/remarks-lookup-from-pdf";
 
@@ -207,6 +208,59 @@ async function main() {
       process.exit(1);
     }
     console.log("OK parse:", path.basename(p), "lineItems:", parsed2.lineItems.length);
+  }
+
+  // Lenient parse: incomplete text should return a partial result instead of throwing
+  {
+    const incompleteText = "Faktura bez numeru\nNIP: 5260214686\nJakieś linie bez pozycji";
+    let strictThrew = false;
+    try {
+      parseInterRiskInvoiceText(incompleteText);
+    } catch {
+      strictThrew = true;
+    }
+    if (!strictThrew) {
+      console.error("incomplete text: strict parse should have thrown but didn't");
+      process.exit(1);
+    }
+
+    const lenient = parseInterRiskInvoiceTextLenient(incompleteText);
+    if (lenient.complete) {
+      console.error("incomplete text: lenient parse should be incomplete but complete=true");
+      process.exit(1);
+    }
+    if (lenient.missingFields.length === 0) {
+      console.error("incomplete text: lenient parse should have missingFields");
+      process.exit(1);
+    }
+    // Must not throw — returns whatever was found
+    if (lenient.invoice.seller.nip !== "5260214686") {
+      console.error("incomplete text: expected seller NIP from partial parse, got:", lenient.invoice.seller.nip);
+      process.exit(1);
+    }
+    console.log(
+      "OK lenient incomplete text complete:",
+      lenient.complete,
+      "missingFields:",
+      lenient.missingFields,
+    );
+  }
+
+  // nie-dziala.pdf should parse fully (regression: previously failed layouts)
+  const nieDzialaPath = path.join(__dirname, "..", "examples", "nie-dziala.pdf");
+  if (fs.existsSync(nieDzialaPath)) {
+    const nb = fs.readFileSync(nieDzialaPath);
+    const nab = nb.buffer.slice(nb.byteOffset, nb.byteOffset + nb.byteLength);
+    const ntext = await extractTextFromPdfBuffer(nab as ArrayBuffer);
+    const full = parseInterRiskInvoiceText(ntext);
+    if (full.invoiceNumber !== "74B/04/2026" || full.lineItems.length !== 3) {
+      console.error("nie-dziala.pdf: unexpected parse", {
+        invoiceNumber: full.invoiceNumber,
+        lineItems: full.lineItems.length,
+      });
+      process.exit(1);
+    }
+    console.log("OK examples/nie-dziala.pdf lineItems:", full.lineItems.length);
   }
 }
 

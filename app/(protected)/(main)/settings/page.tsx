@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { MASKED_TOKEN } from "@/lib/encryption";
 import {
   profileRowSchema,
   type ProfileFormInput,
@@ -36,8 +37,8 @@ export default async function SettingsPage() {
   const defaults: ProfileFormInput = parsed?.success
     ? {
         nip: parsed.data.nip ?? "",
-        ksef_token_demo: parsed.data.ksef_token_demo ?? "",
-        ksef_token_production: parsed.data.ksef_token_production ?? "",
+        ksef_token_demo: parsed.data.ksef_token_demo ? MASKED_TOKEN : "",
+        ksef_token_production: parsed.data.ksef_token_production ? MASKED_TOKEN : "",
         ksef_environment: resolveKsefEnvironment(parsed.data.ksef_environment),
         auto_send: parsed.data.auto_send,
         issuer_name: parsed.data.issuer_name ?? "",

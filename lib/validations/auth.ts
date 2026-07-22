@@ -7,11 +7,30 @@ export const loginSchema = z.object({
 
 export type LoginInput = z.infer<typeof loginSchema>;
 
-export const signupSchema = loginSchema.extend({
-  password: z.string().min(8, "Hasło musi mieć co najmniej 8 znaków"),
-});
+const requiredTrue = (message: string) =>
+  z.boolean().refine((v) => v === true, { message });
+
+export const signupSchema = loginSchema
+  .extend({
+    password: z.string().min(8, "Hasło musi mieć co najmniej 8 znaków"),
+    acceptTerms: requiredTrue("Akceptacja Regulaminu jest wymagana"),
+    acceptPrivacy: requiredTrue("Akceptacja Polityki prywatności jest wymagana"),
+    acceptDpa: requiredTrue(
+      "Zawarcie Umowy powierzenia przetwarzania danych jest wymagane",
+    ),
+  });
 
 export type SignupInput = z.infer<typeof signupSchema>;
+
+export const acceptLegalSchema = z.object({
+  acceptTerms: requiredTrue("Akceptacja Regulaminu jest wymagana"),
+  acceptPrivacy: requiredTrue("Akceptacja Polityki prywatności jest wymagana"),
+  acceptDpa: requiredTrue(
+    "Zawarcie Umowy powierzenia przetwarzania danych jest wymagane",
+  ),
+});
+
+export type AcceptLegalInput = z.infer<typeof acceptLegalSchema>;
 
 export const oauthCallbackQuerySchema = z.object({
   code: z.string().min(1),

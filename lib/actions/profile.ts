@@ -2,12 +2,23 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { encryptToken, MASKED_TOKEN } from "@/lib/encryption";
 import { profileFormSchema } from "@/lib/validations/profile";
 
 export type ProfileActionState = {
   error?: string;
   ok?: boolean;
 };
+
+function resolveTokenValue(
+  submitted: string,
+  existing: string | null | undefined,
+): string | null {
+  const trimmed = submitted.trim();
+  if (!trimmed) return null;
+  if (trimmed === MASKED_TOKEN) return existing ?? null;
+  return encryptToken(trimmed);
+}
 
 export async function saveProfile(
   _prev: ProfileActionState,
@@ -49,13 +60,24 @@ export async function saveProfile(
     return { error: "Brak sesji — zaloguj się ponownie" };
   }
 
+  const { data: currentProfile } = await supabase
+    .from("profiles")
+    .select("ksef_token_demo, ksef_token_production")
+    .eq("id", user.id)
+    .maybeSingle();
+
   const { error } = await supabase.from("profiles").upsert(
     {
       id: user.id,
       nip: parsed.data.nip,
-      ksef_token_demo: parsed.data.ksef_token_demo.trim() || null,
-      ksef_token_production:
-        parsed.data.ksef_token_production.trim() || null,
+      ksef_token_demo: resolveTokenValue(
+        parsed.data.ksef_token_demo,
+        currentProfile?.ksef_token_demo,
+      ),
+      ksef_token_production: resolveTokenValue(
+        parsed.data.ksef_token_production,
+        currentProfile?.ksef_token_production,
+      ),
       ksef_environment: parsed.data.ksef_environment,
       auto_send: parsed.data.auto_send,
       issuer_name: parsed.data.issuer_name,

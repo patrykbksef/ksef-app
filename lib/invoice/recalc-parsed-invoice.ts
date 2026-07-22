@@ -1,4 +1,4 @@
-import type { InvoiceLineItem, ParsedInvoice } from "@/lib/validations/invoice";
+import type { InvoiceLineItem, ParsedInvoice, PartialParsedInvoice } from "@/lib/validations/invoice";
 
 type VatSummaryGroup = ParsedInvoice["vatSummary"][number];
 
@@ -30,7 +30,7 @@ function aggregateVatSummary(lineItems: InvoiceLineItem[]): VatSummaryGroup[] {
   }));
 }
 
-export function recalcParsedInvoice(data: ParsedInvoice): ParsedInvoice {
+export function recalcParsedInvoice(data: PartialParsedInvoice): PartialParsedInvoice {
   const lineItems = data.lineItems.map(recalcLineAmounts);
   const vatSummary = aggregateVatSummary(lineItems);
   const totals = {

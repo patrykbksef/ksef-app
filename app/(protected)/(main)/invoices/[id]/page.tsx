@@ -14,7 +14,12 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { resolveKsefEnvironment } from "@/lib/ksef/config";
 import { buildFa3XmlOptionsFromProfile } from "@/lib/invoice/xml-builder";
-import { invoiceDbSchema, parsedInvoiceSchema } from "@/lib/validations/invoice";
+import {
+  invoiceDbSchema,
+  parsedInvoiceSchema,
+  partialParsedInvoiceSchema,
+  type ParsedInvoice,
+} from "@/lib/validations/invoice";
 import {
   profileReadyForKsefXml,
   profileRowSchema,
@@ -63,13 +68,21 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
     ? resolveKsefEnvironment(profileParsed.data.ksef_environment)
     : "demo";
 
-  const parsed = inv.data.parsed_data
+  const strictParsed = inv.data.parsed_data
     ? parsedInvoiceSchema.safeParse(inv.data.parsed_data)
     : null;
-  const data = parsed?.success ? parsed.data : null;
+  const partialParsed = !strictParsed?.success && inv.data.parsed_data
+    ? partialParsedInvoiceSchema.safeParse(inv.data.parsed_data)
+    : null;
+  const data = strictParsed?.success
+    ? strictParsed.data
+    : partialParsed?.success
+      ? partialParsed.data
+      : null;
+  const isComplete = strictParsed?.success === true;
 
   const canSend =
-    Boolean(data) &&
+    isComplete &&
     Boolean(issuerOptions) &&
     (inv.data.status === "pending_review" ||
       inv.data.status === "parsed" ||
@@ -104,9 +117,9 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
             ksefEnvironment={ksefEnvironment}
           />
 
-          {issuerOptions ? (
-            <KsefPayloadPreview data={data} issuer={issuerOptions} />
-          ) : (
+          {issuerOptions && isComplete ? (
+            <KsefPayloadPreview data={data as ParsedInvoice} issuer={issuerOptions} />
+          ) : !issuerOptions ? (
             <Card>
               <CardHeader>
                 <CardTitle>KSeF — podgląd payloadu</CardTitle>
@@ -116,7 +129,7 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
                 </CardDescription>
               </CardHeader>
             </Card>
-          )}
+          ) : null}
         </>
       )}
 

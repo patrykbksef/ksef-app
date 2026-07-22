@@ -50,7 +50,8 @@ import {
   saveInvoiceParsedData,
   type SaveParsedInvoiceState,
 } from "@/lib/actions/invoices";
-import type { InvoiceLineItem, ParsedInvoice } from "@/lib/validations/invoice";
+import type { InvoiceLineItem, PartialParsedInvoice } from "@/lib/validations/invoice";
+import { parsedInvoiceSchema } from "@/lib/validations/invoice";
 import { formatIsoDatePl } from "@/lib/utils";
 import { InvoiceDetailTitleBlock } from "./invoice-detail-title-block";
 import { SendToKsefForm } from "./send-form";
@@ -75,11 +76,20 @@ const lineDraftSchema = z.object({
 
 const invoiceEditFormSchema = z.object({
   counterpartyName: z.string().min(1, "Wymagana nazwa"),
-  counterpartyNip: z.string().min(1, "Wymagany NIP"),
+  counterpartyNip: z
+    .string()
+    .min(1, "Wymagany NIP")
+    .regex(/^\d{10}$/, "NIP musi mieć 10 cyfr"),
   counterpartyAddress: z.string(),
   invoiceNumber: z.string().min(1, "Wymagany numer"),
-  issueDate: z.string().min(1, "Wymagana data"),
-  saleDate: z.string().min(1, "Wymagana data"),
+  issueDate: z
+    .string()
+    .min(1, "Wymagana data")
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Format: YYYY-MM-DD"),
+  saleDate: z
+    .string()
+    .min(1, "Wymagana data")
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Format: YYYY-MM-DD"),
   remarks: z.string(),
   lineItems: z.array(lineDraftSchema).min(1, "Co najmniej jedna pozycja"),
 });
@@ -111,25 +121,36 @@ function toLineDrafts(items: InvoiceLineItem[]): LineDraft[] {
   }));
 }
 
+const EMPTY_LINE_DRAFT: LineDraft = {
+  lineNumber: 1,
+  name: "",
+  unit: "szt.",
+  quantity: "1",
+  netAmount: "0.00",
+  vatRate: "23",
+};
+
 function toFormValues(
-  p: ParsedInvoice,
+  p: PartialParsedInvoice,
   issuerNip: string,
 ): InvoiceEditFormValues {
   const counterparty = podmiot2CounterpartyFromParsed(p, issuerNip);
+  const drafts = toLineDrafts(p.lineItems);
+  const nipDigits = counterparty.nip.replace(/\D/g, "").slice(0, 10);
   return {
     counterpartyName: counterparty.name,
-    counterpartyNip: counterparty.nip,
+    counterpartyNip: nipDigits,
     counterpartyAddress: counterparty.addressLines.join("\n"),
     invoiceNumber: p.invoiceNumber,
     issueDate: p.issueDate,
     saleDate: p.saleDate,
     remarks: p.remarks ?? "",
-    lineItems: toLineDrafts(p.lineItems),
+    lineItems: drafts.length > 0 ? drafts : [{ ...EMPTY_LINE_DRAFT }],
   };
 }
 
 function formValuesWithOptionalRemarksPrefix(
-  p: ParsedInvoice,
+  p: PartialParsedInvoice,
   issuerNip: string,
 ): InvoiceEditFormValues {
   const v = toFormValues(p, issuerNip);
@@ -171,11 +192,32 @@ function parseDraftLines(
   });
 }
 
+function ensurePartyName<T extends { name: string }>(
+  party: T,
+  fallback: string,
+): T {
+  return party.name.trim() ? party : { ...party, name: fallback };
+}
+
+function ensureIssuerParty(
+  party: PartialParsedInvoice["seller"],
+  issuerNip: string,
+  nameFallback: string,
+): PartialParsedInvoice["seller"] {
+  const withName = ensurePartyName(party, nameFallback);
+  const nip = withName.nip.replace(/\D/g, "");
+  if (nip.length === 10) return withName;
+  const fromProfile = issuerNip.replace(/\D/g, "").slice(0, 10);
+  return fromProfile.length === 10
+    ? { ...withName, nip: fromProfile }
+    : withName;
+}
+
 function buildPayload(
-  base: ParsedInvoice,
+  base: PartialParsedInvoice,
   values: InvoiceEditFormValues,
   issuerNip: string,
-): ParsedInvoice {
+): PartialParsedInvoice {
   const partialLines = parseDraftLines(values.lineItems);
   const lineItems: InvoiceLineItem[] = partialLines.map((p) => ({
     ...p,
@@ -183,26 +225,27 @@ function buildPayload(
     vatAmount: 0,
     grossAmount: 0,
   }));
-  const cpRef = podmiot2CounterpartyFromParsed(base, issuerNip);
   const addrLines = values.counterpartyAddress
     .split("\n")
     .map((s) => s.trim())
     .filter(Boolean);
   const nip = values.counterpartyNip.trim().replace(/\D/g, "").slice(0, 10);
   const editedParty = {
-    name: values.counterpartyName.trim() || cpRef.name,
-    nip: nip.length === 10 ? nip : cpRef.nip,
-    addressLines: addrLines.length > 0 ? addrLines : [...cpRef.addressLines],
+    name: values.counterpartyName.trim(),
+    nip: nip.length === 10 ? nip : values.counterpartyNip.trim(),
+    addressLines: addrLines,
   };
   const side = issuerPartyFromParsed(base, issuerNip);
   if (side === "seller") {
     return {
       ...base,
-      seller: base.seller,
+      // Issuer-side fields are not editable (Podmiot1 comes from profile);
+      // fill gaps so strict save validation can succeed after partial parse.
+      seller: ensureIssuerParty(base.seller, issuerNip, "Nieznany sprzedawca"),
       buyer: editedParty,
-      invoiceNumber: values.invoiceNumber.trim() || base.invoiceNumber,
-      issueDate: values.issueDate.trim() || base.issueDate,
-      saleDate: values.saleDate.trim() || base.saleDate,
+      invoiceNumber: values.invoiceNumber.trim(),
+      issueDate: values.issueDate.trim(),
+      saleDate: values.saleDate.trim(),
       remarks: values.remarks.trim() || undefined,
       lineItems,
       vatSummary: base.vatSummary,
@@ -212,10 +255,10 @@ function buildPayload(
   return {
     ...base,
     seller: editedParty,
-    buyer: base.buyer,
-    invoiceNumber: values.invoiceNumber.trim() || base.invoiceNumber,
-    issueDate: values.issueDate.trim() || base.issueDate,
-    saleDate: values.saleDate.trim() || base.saleDate,
+    buyer: ensureIssuerParty(base.buyer, issuerNip, "Nieznany nabywca"),
+    invoiceNumber: values.invoiceNumber.trim(),
+    issueDate: values.issueDate.trim(),
+    saleDate: values.saleDate.trim(),
     remarks: values.remarks.trim() || undefined,
     lineItems,
     vatSummary: base.vatSummary,
@@ -230,13 +273,34 @@ function InvoiceFormSections({
   issuerOptions,
   parsedSnapshotKey,
 }: {
-  initial: ParsedInvoice;
+  initial: PartialParsedInvoice;
   issuerOptions: BuildFa3XmlOptions | null;
   parsedSnapshotKey: string;
 }) {
-  const { control, register, setValue, getValues } =
+  const { control, register, setValue, getValues, formState: { errors } } =
     useFormContext<InvoiceEditFormValues>();
-  const { fields } = useFieldArray({ control, name: "lineItems" });
+  const { fields, append, remove } = useFieldArray({ control, name: "lineItems" });
+
+  const strictResult = useMemo(
+    () => parsedInvoiceSchema.safeParse(initial),
+    [initial],
+  );
+  const missingFieldLabels = useMemo(() => {
+    if (strictResult.success) return [];
+    const labels: string[] = [];
+    for (const issue of strictResult.error.issues) {
+      const path = issue.path.join(".");
+      if (path.includes("invoiceNumber") && !initial.invoiceNumber) labels.push("Numer faktury");
+      else if (path.includes("issueDate") && !initial.issueDate) labels.push("Data wystawienia");
+      else if (path.includes("saleDate") && !initial.saleDate) labels.push("Data sprzedaży");
+      else if (path.includes("seller.nip") && !initial.seller.nip) labels.push("NIP sprzedawcy");
+      else if (path.includes("seller.name") && !initial.seller.name) labels.push("Nazwa sprzedawcy");
+      else if (path.includes("buyer.nip") && !initial.buyer.nip) labels.push("NIP nabywcy");
+      else if (path.includes("buyer.name") && !initial.buyer.name) labels.push("Nazwa nabywcy");
+      else if (path.includes("lineItems") && initial.lineItems.length === 0) labels.push("Pozycje faktury");
+    }
+    return [...new Set(labels)];
+  }, [strictResult, initial]);
 
   const [autoPrefixGap, setAutoPrefixGap] = useState(false);
   const [remarksPrefixText, setRemarksPrefixText] = useState("");
@@ -297,6 +361,20 @@ function InvoiceFormSections({
 
   return (
     <>
+      {missingFieldLabels.length > 0 && (
+        <Card className="border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/20">
+          <CardHeader>
+            <CardTitle className="text-yellow-800 dark:text-yellow-200">
+              Niekompletne dane z PDF
+            </CardTitle>
+            <CardDescription className="text-yellow-700 dark:text-yellow-300">
+              Nie udało się odczytać: {missingFieldLabels.join(", ")}.
+              Uzupełnij brakujące pola i zapisz, aby móc wysłać fakturę do KSeF.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>Strony</CardTitle>
@@ -339,23 +417,33 @@ function InvoiceFormSections({
               <h4 className="text-muted-foreground mb-2 text-sm font-medium">
                 Kontrahent (Podmiot2) — edycja
               </h4>
-              <Input
-                {...register("counterpartyName")}
-                aria-label="Nazwa kontrahenta (Podmiot2)"
-                className="text-sm"
-              />
+              <div>
+                <Input
+                  {...register("counterpartyName")}
+                  aria-label="Nazwa kontrahenta (Podmiot2)"
+                  className="text-sm"
+                />
+                {errors.counterpartyName && (
+                  <p className="text-destructive mt-1 text-xs">{errors.counterpartyName.message}</p>
+                )}
+              </div>
               <Textarea
                 {...register("counterpartyAddress")}
                 aria-label="Adres kontrahenta (linie)"
                 rows={3}
                 className="text-sm"
               />
-              <Input
-                {...register("counterpartyNip")}
-                aria-label="NIP kontrahenta"
-                className="font-mono text-sm"
-                maxLength={13}
-              />
+              <div>
+                <Input
+                  {...register("counterpartyNip")}
+                  aria-label="NIP kontrahenta"
+                  className="font-mono text-sm"
+                  maxLength={13}
+                />
+                {errors.counterpartyNip && (
+                  <p className="text-destructive mt-1 text-xs">{errors.counterpartyNip.message}</p>
+                )}
+              </div>
             </div>
           </div>
           <div className="space-y-6">
@@ -393,6 +481,9 @@ function InvoiceFormSections({
               <span className="font-mono text-xs">P_2</span>)
             </span>
             <Input {...register("invoiceNumber")} className="max-w-md" />
+            {errors.invoiceNumber && (
+              <p className="text-destructive text-xs">{errors.invoiceNumber.message}</p>
+            )}
           </div>
           <div className="flex flex-col gap-1">
             <span className="text-muted-foreground">
@@ -403,6 +494,9 @@ function InvoiceFormSections({
               {...register("issueDate")}
               className="max-w-md font-mono"
             />
+            {errors.issueDate && (
+              <p className="text-destructive text-xs">{errors.issueDate.message}</p>
+            )}
             <span className="text-muted-foreground text-xs">
               Podgląd: {formatIsoDatePl(issueDate)}
             </span>
@@ -413,6 +507,9 @@ function InvoiceFormSections({
               <span className="font-mono text-xs">P_6</span>) — ISO YYYY-MM-DD
             </span>
             <Input {...register("saleDate")} className="max-w-md font-mono" />
+            {errors.saleDate && (
+              <p className="text-destructive text-xs">{errors.saleDate.message}</p>
+            )}
             <span className="text-muted-foreground text-xs">
               Podgląd: {formatIsoDatePl(saleDate)}
             </span>
@@ -438,6 +535,7 @@ function InvoiceFormSections({
                 <TableHead>Netto</TableHead>
                 <TableHead>VAT %</TableHead>
                 <TableHead>Brutto</TableHead>
+                <TableHead />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -489,11 +587,42 @@ function InvoiceFormSections({
                     <TableCell>
                       {computed ? computed.grossAmount.toFixed(2) : "—"}
                     </TableCell>
+                    <TableCell>
+                      {fields.length > 1 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => remove(i)}
+                          aria-label="Usuń pozycję"
+                          className="text-destructive h-8 w-8 p-0"
+                        >
+                          ×
+                        </Button>
+                      )}
+                    </TableCell>
                   </TableRow>
                 );
               })}
             </TableBody>
           </Table>
+          {errors.lineItems && typeof errors.lineItems.message === "string" && (
+            <p className="text-destructive mt-2 text-xs">{errors.lineItems.message}</p>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-4"
+            onClick={() =>
+              append({
+                ...EMPTY_LINE_DRAFT,
+                lineNumber: fields.length + 1,
+              })
+            }
+          >
+            + Dodaj pozycję
+          </Button>
         </CardContent>
       </Card>
 
@@ -581,7 +710,7 @@ export function InvoiceDetailPageClient({
   status: string;
   ksefReference: string | null;
   errorMessage: string | null;
-  initial: ParsedInvoice;
+  initial: PartialParsedInvoice;
   issuerOptions: BuildFa3XmlOptions | null;
   parsedSnapshot: string;
   canSendToKsef: boolean;

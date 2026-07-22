@@ -79,6 +79,42 @@ export const parsedInvoiceSchema = z.object({
 
 export type ParsedInvoice = z.infer<typeof parsedInvoiceSchema>;
 
+const partialPartySchema = z.object({
+  name: z.string(),
+  addressLines: z.array(z.string()),
+  nip: z.string().regex(/^(\d{10})?$/),
+});
+
+/**
+ * Relaxed version of parsedInvoiceSchema that accepts empty strings for
+ * required fields and zero line items. Structurally identical to
+ * ParsedInvoice so no type churn downstream.
+ */
+export const partialParsedInvoiceSchema = z.object({
+  invoiceNumber: z.string(),
+  issueDate: z.string(),
+  saleDate: z.string(),
+  seller: partialPartySchema,
+  buyer: partialPartySchema,
+  bankName: z.string().optional(),
+  bankAccount: z.string().optional(),
+  paymentDays: z.number().int().nonnegative().optional(),
+  paymentMethod: z.string().optional(),
+  amountDue: z.number().nonnegative().optional(),
+  referenceNumber: z.string().optional(),
+  remarks: z.string().optional(),
+  lineItems: z.array(invoiceLineItemSchema),
+  vatSummary: z.array(vatSummaryGroupSchema),
+  totals: z.object({
+    net: z.number().nonnegative(),
+    vat: z.number().nonnegative(),
+    gross: z.number().nonnegative(),
+  }),
+  currency: z.literal("PLN"),
+});
+
+export type PartialParsedInvoice = z.infer<typeof partialParsedInvoiceSchema>;
+
 const invoiceStatusEnum = z.enum([
   "parsed",
   "pending_review",
@@ -91,7 +127,7 @@ export const invoiceDbSchema = z.object({
   id: z.string().uuid(),
   user_id: z.string().uuid(),
   file_name: z.string(),
-  parsed_data: parsedInvoiceSchema.nullable(),
+  parsed_data: partialParsedInvoiceSchema.nullable(),
   xml_content: z.string().nullable(),
   ksef_reference: z.string().nullable(),
   status: invoiceStatusEnum,

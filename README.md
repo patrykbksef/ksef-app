@@ -9,6 +9,7 @@ Create `.env.local` (or Vercel env vars):
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_anon_or_publishable_key
+NEXT_PUBLIC_APP_URL=http://localhost:3000
 
 # Panel AI (`/dashboard-ai`) — primary: Google Gemini; optional fallback: OpenAI when Gemini is overloaded
 GOOGLE_GENERATIVE_AI_API_KEY=your_google_ai_studio_key
@@ -22,7 +23,9 @@ OPENAI_API_KEY=sk-your-openai-key
 ## Supabase
 
 1. Enable **Email** auth and **Google** OAuth (add redirect URL: `http://localhost:3000/auth/callback` and your production URL).
-2. Run the SQL in [`supabase/migrations/001_profiles_invoices.sql`](supabase/migrations/001_profiles_invoices.sql) in the SQL editor (tables, RLS, profile trigger on signup).
+2. Run the SQL migrations in [`supabase/migrations/`](supabase/migrations/) in the SQL editor (tables, RLS, profile trigger on signup, legal acceptance columns).
+
+Public legal pages: `/regulamin`, `/polityka-prywatnosci`, `/umowa-powierzenia`. Logged-in users must accept them on `/akceptacja-dokumentow` before using the app.
 
 ## Local dev
 
@@ -45,3 +48,11 @@ Use credentials from the MF **test** environment. The app calls `https://api-tes
 ## PDF format
 
 The classic **Panel** uses a regex parser for InterRisk-style layouts (see [`invoice-example.pdf`](invoice-example.pdf)). **Panel AI** (`/dashboard-ai`) sends the PDF to Gemini and fits arbitrary layouts into the same `ParsedInvoice` schema (requires `GOOGLE_GENERATIVE_AI_API_KEY`).
+
+## Running tests localy
+
+`pnpm dlx tsx scripts/verify-invoice-pdf.ts`
+
+## Legal documents
+
+Updating legal documents you have to update also LEGAL_DOCS_VERSION - then have to approve the newest version again

@@ -81,8 +81,7 @@ export default async function DashboardPage() {
         <CardHeader>
           <CardTitle>Wgraj fakturę</CardTitle>
           <CardDescription>
-            Tylko PDF, maks. 5 MB. Parser obsługuje m.in. szablony InterRisk,
-            Compensa i Global Assistance.
+            Tylko PDF, maks. 5 MB.
           </CardDescription>
         </CardHeader>
         <CardContent>

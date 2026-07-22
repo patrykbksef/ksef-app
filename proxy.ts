@@ -1,7 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createSupabaseProxyClient } from "@/lib/supabase/proxy";
 
-const PROTECTED_PREFIXES = ["/dashboard", "/settings", "/invoices"];
+const PROTECTED_PREFIXES = [
+  "/dashboard",
+  "/settings",
+  "/invoices",
+  "/akceptacja-dokumentow",
+];
 
 export async function proxy(request: NextRequest) {
   const { supabase, response } = await createSupabaseProxyClient(request);
