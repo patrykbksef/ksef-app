@@ -80,6 +80,7 @@ export const profileRowSchema = z.object({
   privacy_accepted_at: z.string().nullable().optional(),
   dpa_accepted_at: z.string().nullable().optional(),
   legal_docs_version: z.string().nullable().optional(),
+  verified: z.boolean(),
   created_at: z.string(),
   updated_at: z.string(),
 });

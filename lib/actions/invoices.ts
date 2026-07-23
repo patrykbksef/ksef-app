@@ -13,6 +13,7 @@ import { mergeRemarksFromPdfLookup, parseRemarksLookupPrefixFromFormData } from 
 import { sendInvoiceToKsefWithToken } from "@/lib/ksef/client";
 import { resolveKsefEnvironment } from "@/lib/ksef/config";
 import { recalcParsedInvoice } from "@/lib/invoice/recalc-parsed-invoice";
+import { assertUnverifiedCanUpload } from "@/lib/invoice/upload-limits";
 import { fileUploadSchema, parsedInvoiceSchema, type ParsedInvoice } from "@/lib/validations/invoice";
 import { z } from "zod";
 import { ksefTokenForProfile, profileRowSchema } from "@/lib/validations/profile";
@@ -65,6 +66,9 @@ export async function uploadInvoice(_prev: UploadInvoiceState, formData: FormDat
         "Uzupełnij w Ustawieniach: NIP, token KSeF dla wybranego środowiska (demo lub produkcja), nazwę sprzedawcy i pierwszą linię adresu",
     };
   }
+
+  const limitErr = await assertUnverifiedCanUpload(supabase, user.id, profile.verified);
+  if (limitErr) return limitErr;
 
   let text: string;
   try {
@@ -234,6 +238,9 @@ export async function uploadInvoiceAi(_prev: UploadInvoiceState, formData: FormD
         "Uzupełnij w Ustawieniach: NIP, token KSeF dla wybranego środowiska (demo lub produkcja), nazwę sprzedawcy i pierwszą linię adresu",
     };
   }
+
+  const limitErr = await assertUnverifiedCanUpload(supabase, user.id, profile.verified);
+  if (limitErr) return limitErr;
 
   let buf: ArrayBuffer;
   try {
@@ -416,6 +423,9 @@ export async function uploadInvoiceAzureDi(_prev: UploadInvoiceState, formData: 
         "Uzupełnij w Ustawieniach: NIP, token KSeF dla wybranego środowiska (demo lub produkcja), nazwę sprzedawcy i pierwszą linię adresu",
     };
   }
+
+  const limitErr = await assertUnverifiedCanUpload(supabase, user.id, profile.verified);
+  if (limitErr) return limitErr;
 
   let buf: ArrayBuffer;
   try {

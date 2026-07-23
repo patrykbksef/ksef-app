@@ -45,13 +45,23 @@ export default async function DashboardAiPage() {
   const p = profile?.success ? profile.data : null;
 
   const profileComplete = Boolean(p && profileReadyForKsefXml(p));
+  const verified = p?.verified === true;
 
-  const { data: invoicesRaw } = await supabase
-    .from("invoices")
-    .select("id, file_name, status, created_at, ksef_reference")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false })
-    .limit(20);
+  const [{ data: invoicesRaw }, { count: totalInvoiceCount }] = await Promise.all([
+    supabase
+      .from("invoices")
+      .select("id, file_name, status, created_at, ksef_reference")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(20),
+    supabase
+      .from("invoices")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", user.id),
+  ]);
+
+  const uploadBlockedByVerification = !verified && (totalInvoiceCount ?? 0) >= 1;
+  const canUpload = profileComplete && !uploadBlockedByVerification;
 
   return (
     <div className="space-y-8">
@@ -74,6 +84,21 @@ export default async function DashboardAiPage() {
         </Card>
       ) : null}
 
+      {uploadBlockedByVerification ? (
+        <Card className="border-amber-500/50 bg-amber-500/5">
+          <CardHeader>
+            <CardTitle className="text-lg">Wymagana weryfikacja</CardTitle>
+            <CardDescription>
+              Limit jednej faktury został wykorzystany. Zadzwoń pod{" "}
+              <a href="tel:503758919" className="font-medium underline-offset-2 hover:underline">
+                503 758 919
+              </a>
+              , aby odblokować konto.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle>Wgraj fakturę (AI)</CardTitle>
@@ -83,7 +108,7 @@ export default async function DashboardAiPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <DashboardAiUpload disabled={!profileComplete} />
+          <DashboardAiUpload disabled={!canUpload} />
         </CardContent>
       </Card>
 
