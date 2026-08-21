@@ -23,7 +23,7 @@ import { recalcParsedInvoice } from "@/lib/invoice/recalc-parsed-invoice";
 import { assertUnverifiedCanUpload } from "@/lib/invoice/upload-limits";
 import {
   fileUploadSchema,
-  ksefReadyInvoiceSchema,
+  parsedInvoiceSchema,
   type ParsedInvoice,
 } from "@/lib/validations/invoice";
 import { z } from "zod";
@@ -406,7 +406,7 @@ export async function uploadInvoiceAi(_prev: UploadInvoiceState, formData: FormD
   let ksefRef: string | null = null;
   let errMsg: string | null = null;
 
-  const readyForKsef = ksefReadyInvoiceSchema.safeParse(parsedInvoice);
+  const readyForKsef = parsedInvoiceSchema.safeParse(parsedInvoice);
   if (readyForKsef.success) {
     try {
       xml = buildFa3XmlFromParsedInvoice(readyForKsef.data, xmlOptions);
@@ -594,7 +594,7 @@ export async function uploadInvoiceAzureDi(_prev: UploadInvoiceState, formData: 
   let ksefRef: string | null = null;
   let errMsg: string | null = null;
 
-  const readyForKsef = ksefReadyInvoiceSchema.safeParse(parsedInvoice);
+  const readyForKsef = parsedInvoiceSchema.safeParse(parsedInvoice);
   if (readyForKsef.success) {
     try {
       xml = buildFa3XmlFromParsedInvoice(readyForKsef.data, xmlOptions);
@@ -694,7 +694,7 @@ export async function saveInvoiceParsedData(
     return { error: "Nieprawidłowy format danych" };
   }
 
-  const first = ksefReadyInvoiceSchema.safeParse(unknown);
+  const first = parsedInvoiceSchema.safeParse(unknown);
   if (!first.success) {
     return {
       error: first.error.issues[0]?.message ?? "Dane faktury nie przeszły walidacji",
@@ -702,7 +702,7 @@ export async function saveInvoiceParsedData(
   }
 
   const recalced = recalcParsedInvoice(first.data);
-  const final = ksefReadyInvoiceSchema.safeParse(recalced);
+  const final = parsedInvoiceSchema.safeParse(recalced);
   if (!final.success) {
     return { error: "Po przeliczeniu kwot dane są niespójne" };
   }
@@ -782,7 +782,7 @@ export async function sendInvoiceToKsef(_prev: SendInvoiceState, formData: FormD
     return { error: "Brak danych faktury — wgraj ponownie plik PDF" };
   }
 
-  const parsedStored = ksefReadyInvoiceSchema.safeParse(invRaw.parsed_data);
+  const parsedStored = parsedInvoiceSchema.safeParse(invRaw.parsed_data);
   if (!parsedStored.success) {
     return {
       error:

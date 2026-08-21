@@ -26,65 +26,6 @@ export const fileUploadSchema = z
 
 export type FileUploadInput = z.infer<typeof fileUploadSchema>;
 
-export const VAT_RATES = [
-  23,
-  22,
-  8,
-  7,
-  5,
-  4,
-  3,
-  "0 KR",
-  "0 WDT",
-  "0 EX",
-  "zw",
-  "oo",
-  "np I",
-  "np II",
-] as const;
-
-export const vatRateSchema = z.union([
-  z.union([
-    z.literal(23),
-    z.literal(22),
-    z.literal(8),
-    z.literal(7),
-    z.literal(5),
-    z.literal(4),
-    z.literal(3),
-  ]),
-  z.enum(["0 KR", "0 WDT", "0 EX", "zw", "oo", "np I", "np II"]),
-]);
-
-export type VatRate = z.infer<typeof vatRateSchema>;
-
-export function normalizeVatRate(value: string | number): VatRate | null {
-  if (typeof value === "number") {
-    if (value === 0) return "0 KR";
-    const result = vatRateSchema.safeParse(value);
-    return result.success ? result.data : null;
-  }
-
-  const normalized = value.trim().replace(/%$/, "").replace(/,/g, ".");
-  const special = normalized.toLowerCase().replace(/\s+/g, " ");
-  const aliases: Record<string, VatRate> = {
-    zw: "zw",
-    oo: "oo",
-    np: "np I",
-    "np i": "np I",
-    "np ii": "np II",
-    "0 kr": "0 KR",
-    "0 wdt": "0 WDT",
-    "0 ex": "0 EX",
-  };
-  if (aliases[special]) return aliases[special];
-
-  const numeric = Number(normalized);
-  if (numeric === 0) return "0 KR";
-  const result = vatRateSchema.safeParse(numeric);
-  return result.success ? result.data : null;
-}
-
 export const invoiceLineItemSchema = z.object({
   lineNumber: z.number().int().positive(),
   name: z.string().min(1),
@@ -92,7 +33,7 @@ export const invoiceLineItemSchema = z.object({
   quantity: z.number().positive(),
   netUnitPrice: z.number().nonnegative(),
   netAmount: z.number().nonnegative(),
-  vatRate: vatRateSchema,
+  vatRate: z.number().nonnegative(),
   vatAmount: z.number().nonnegative(),
   grossAmount: z.number().nonnegative(),
 });
@@ -100,7 +41,7 @@ export const invoiceLineItemSchema = z.object({
 export type InvoiceLineItem = z.infer<typeof invoiceLineItemSchema>;
 
 export const vatSummaryGroupSchema = z.object({
-  vatRate: vatRateSchema,
+  vatRate: z.number().nonnegative(),
   netAmount: z.number().nonnegative(),
   vatAmount: z.number().nonnegative(),
   grossAmount: z.number().nonnegative(),
@@ -155,11 +96,6 @@ const partySchema = z
   })
   .superRefine(validatePartyIdentifier);
 
-const vatExemptionSchema = z.object({
-  basisType: z.enum(["law", "directive", "other"]),
-  basis: z.string().trim().min(1, "Wymagana podstawa zwolnienia").max(256),
-});
-
 export const parsedInvoiceSchema = z.object({
   invoiceNumber: z.string().min(1),
   issueDate: z.string().min(1),
@@ -173,7 +109,6 @@ export const parsedInvoiceSchema = z.object({
   amountDue: z.number().nonnegative().optional(),
   referenceNumber: z.string().optional(),
   remarks: z.string().optional(),
-  vatExemption: vatExemptionSchema.optional(),
   lineItems: z.array(invoiceLineItemSchema).min(1),
   vatSummary: z.array(vatSummaryGroupSchema),
   totals: z.object({
@@ -182,16 +117,6 @@ export const parsedInvoiceSchema = z.object({
     gross: z.number().nonnegative(),
   }),
   currency: z.literal("PLN"),
-});
-
-export const ksefReadyInvoiceSchema = parsedInvoiceSchema.superRefine((invoice, ctx) => {
-  if (invoice.lineItems.some((line) => line.vatRate === "zw") && !invoice.vatExemption) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["vatExemption", "basis"],
-      message: "Dla stawki zw podaj podstawę zwolnienia z VAT",
-    });
-  }
 });
 
 export type ParsedInvoice = z.infer<typeof parsedInvoiceSchema>;
@@ -220,7 +145,6 @@ export const partialParsedInvoiceSchema = z.object({
   amountDue: z.number().nonnegative().optional(),
   referenceNumber: z.string().optional(),
   remarks: z.string().optional(),
-  vatExemption: vatExemptionSchema.optional(),
   lineItems: z.array(invoiceLineItemSchema),
   vatSummary: z.array(vatSummaryGroupSchema),
   totals: z.object({

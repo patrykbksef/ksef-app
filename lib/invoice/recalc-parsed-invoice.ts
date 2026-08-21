@@ -2,7 +2,6 @@ import type {
   InvoiceLineItem,
   ParsedInvoice,
   PartialParsedInvoice,
-  VatRate,
 } from "@/lib/validations/invoice";
 
 type VatSummaryGroup = ParsedInvoice["vatSummary"][number];
@@ -13,16 +12,13 @@ function round2(n: number): number {
 
 export function recalcLineAmounts(row: InvoiceLineItem): InvoiceLineItem {
   const netAmount = round2(row.quantity * row.netUnitPrice);
-  const vatAmount =
-    typeof row.vatRate === "number"
-      ? round2((netAmount * row.vatRate) / 100)
-      : 0;
+  const vatAmount = round2((netAmount * row.vatRate) / 100);
   const grossAmount = round2(netAmount + vatAmount);
   return { ...row, netAmount, vatAmount, grossAmount };
 }
 
 function aggregateVatSummary(lineItems: InvoiceLineItem[]): VatSummaryGroup[] {
-  const map = new Map<VatRate, { net: number; vat: number; gross: number }>();
+  const map = new Map<number, { net: number; vat: number; gross: number }>();
   for (const row of lineItems) {
     const e = map.get(row.vatRate) ?? { net: 0, vat: 0, gross: 0 };
     e.net += row.netAmount;

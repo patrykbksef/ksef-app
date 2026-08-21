@@ -3,11 +3,7 @@ import type {
   AnalyzeResultOutput,
   DocumentFieldOutput,
 } from "@azure-rest/ai-document-intelligence";
-import {
-  normalizeVatRate,
-  type ParsedInvoice,
-  type VatRate,
-} from "@/lib/validations/invoice";
+import type { ParsedInvoice } from "@/lib/validations/invoice";
 import { isValidNipChecksum } from "@/lib/validations/profile";
 import {
   taxIdentifierFields,
@@ -178,7 +174,7 @@ function mapLineItemRow(
   quantity: number;
   netUnitPrice: number;
   netAmount: number;
-  vatRate: VatRate;
+  vatRate: number;
   vatAmount: number;
   grossAmount: number;
 } | null {
@@ -207,10 +203,13 @@ function mapLineItemRow(
   const taxLine = fieldNumber(
     pickObjectField(o, "Tax", "TaxAmount", "VATAmount", "VAT"),
   );
-  const explicitRateField = pickObjectField(o, "TaxRate", "VATRate", "VatRate");
-  const explicitRate =
-    fieldNumber(explicitRateField) ?? fieldString(explicitRateField) ?? "23";
-  const vr = normalizeVatRate(explicitRate) ?? 23;
+  const explicitRate = fieldNumber(
+    pickObjectField(o, "TaxRate", "VATRate", "VatRate"),
+  );
+  const vr =
+    explicitRate != null && explicitRate > 0 && explicitRate <= 100
+      ? explicitRate
+      : 23;
 
   const fromUnit = unitPrice > 0 ? unitPrice * qty : 0;
 

@@ -116,7 +116,6 @@ export function buildKsefLiteInvoiceInput(data: ParsedInvoice, options: BuildFa3
   const saleDate = new Date(data.saleDate);
   const podmiot2 = podmiot2CounterpartyFromParsed(data, options.issuerNip);
   const podmiot2Identifier = buyerIdentifierForKsef(podmiot2);
-  const exemption = data.vatExemption;
 
   return {
     seller: {
@@ -136,16 +135,6 @@ export function buildKsefLiteInvoiceInput(data: ParsedInvoice, options: BuildFa3
       saleDate,
       currency: data.currency,
       invoiceType: "VAT" as const,
-      ...(data.lineItems.some((line) => line.vatRate === "zw") && exemption
-        ? {
-            annotations: {
-              p_19: 1 as const,
-              ...(exemption.basisType === "law" ? { p_19a: exemption.basis } : {}),
-              ...(exemption.basisType === "directive" ? { p_19b: exemption.basis } : {}),
-              ...(exemption.basisType === "other" ? { p_19c: exemption.basis } : {}),
-            },
-          }
-        : {}),
       items: data.lineItems.map((row) => ({
         name: row.name,
         quantity: row.quantity,

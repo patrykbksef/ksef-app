@@ -51,8 +51,7 @@ Currency is PLN only.
   - No tax identifier printed: identifierType="none", identifierValue="", nip="".
 - lineItems: every row from the positions table; lineNumber starts at 1 and increases.
 - Each line: name, unit (e.g. szt., km., kg), quantity, netUnitPrice, netAmount, vatRate, vatAmount, grossAmount.
-- vatRate must be one of: 23, 22, 8, 7, 5, 4, 3, "0 KR", "0 WDT", "0 EX", "zw", "oo", "np I", "np II". Do not convert ZW or NP to numeric zero. A plain NP should be "np I" unless the document clearly identifies EU services under art. 100(1)(4), which are "np II".
-- If a ZW line is present and the invoice prints a legal exemption basis, return vatExemption with basisType="law", "directive", or "other" and copy that basis. If no basis is printed, omit vatExemption; never invent a legal basis.
+- vatRate is a numeric percentage, for example 23, 8 or 0.
 - vatSummary: aggregate by VAT rate (net, VAT, gross per rate).
 - totals: sum net, sum VAT, sum gross (should match invoice if visible).
 - addressLines: array of non-empty address lines without redundant NIP lines.

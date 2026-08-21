@@ -64,14 +64,8 @@ import {
   saveInvoiceParsedData,
   type SaveParsedInvoiceState,
 } from "@/lib/actions/invoices";
-import type {
-  InvoiceLineItem,
-  PartialParsedInvoice,
-} from "@/lib/validations/invoice";
-import {
-  normalizeVatRate,
-  parsedInvoiceSchema,
-} from "@/lib/validations/invoice";
+import type { InvoiceLineItem, PartialParsedInvoice } from "@/lib/validations/invoice";
+import { parsedInvoiceSchema } from "@/lib/validations/invoice";
 import { formatIsoDatePl } from "@/lib/utils";
 import { InvoiceDetailTitleBlock } from "./invoice-detail-title-block";
 import { SendToKsefForm } from "./send-form";
@@ -91,9 +85,7 @@ const lineDraftSchema = z.object({
   unit: z.string(),
   quantity: z.string(),
   netAmount: z.string(),
-  vatRate: z.string().refine((value) => normalizeVatRate(value) !== null, {
-    message: "Wybierz stawkę VAT",
-  }),
+  vatRate: z.string(),
 });
 
 const invoiceEditFormSchema = z.object({
@@ -112,8 +104,6 @@ const invoiceEditFormSchema = z.object({
     .min(1, "Wymagana data")
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Format: YYYY-MM-DD"),
   remarks: z.string(),
-  vatExemptionBasisType: z.enum(["law", "directive", "other"]),
-  vatExemptionBasis: z.string().max(256, "Maksymalnie 256 znaków"),
   lineItems: z.array(lineDraftSchema).min(1, "Co najmniej jedna pozycja"),
 }).superRefine((values, ctx) => {
   const type = values.counterpartyIdentifierType;
@@ -133,12 +123,6 @@ const invoiceEditFormSchema = z.object({
   }
   if (type === "other" && !/^[A-Z0-9+*\-\.]{1,50}$/.test(value)) {
     ctx.addIssue({ code: "custom", path: ["counterpartyIdentifierValue"], message: "Wpisz identyfikator podatkowy" });
-  }
-  if (
-    values.lineItems.some((line) => normalizeVatRate(line.vatRate) === "zw") &&
-    !values.vatExemptionBasis.trim()
-  ) {
-    ctx.addIssue({ code: "custom", path: ["vatExemptionBasis"], message: "Dla stawki zw podaj podstawę zwolnienia" });
   }
 });
 
@@ -178,23 +162,6 @@ const EMPTY_LINE_DRAFT: LineDraft = {
   vatRate: "23",
 };
 
-const VAT_RATE_OPTIONS: { value: string; label: string }[] = [
-  { value: "23", label: "23%" },
-  { value: "22", label: "22%" },
-  { value: "8", label: "8%" },
-  { value: "7", label: "7%" },
-  { value: "5", label: "5%" },
-  { value: "4", label: "4%" },
-  { value: "3", label: "3%" },
-  { value: "0 KR", label: "0% – krajowa" },
-  { value: "0 WDT", label: "0% – WDT" },
-  { value: "0 EX", label: "0% – eksport" },
-  { value: "zw", label: "ZW – zwolniona" },
-  { value: "oo", label: "OO – odwrotne obciążenie" },
-  { value: "np I", label: "NP I – poza terytorium kraju" },
-  { value: "np II", label: "NP II – usługi UE (art. 100)" },
-];
-
 function toFormValues(
   p: PartialParsedInvoice,
   issuerNip: string,
@@ -212,8 +179,6 @@ function toFormValues(
     issueDate: p.issueDate,
     saleDate: p.saleDate,
     remarks: p.remarks ?? "",
-    vatExemptionBasisType: p.vatExemption?.basisType ?? "law",
-    vatExemptionBasis: p.vatExemption?.basis ?? "",
     lineItems: drafts.length > 0 ? drafts : [{ ...EMPTY_LINE_DRAFT }],
   };
 }
@@ -245,17 +210,18 @@ function parseDraftLines(
     const unit = d.unit.trim() || "szt.";
     const quantity = Number.parseFloat(d.quantity.replace(",", "."));
     const netAmount = Number.parseFloat(d.netAmount.replace(",", "."));
-    const vatRate = normalizeVatRate(d.vatRate) ?? "0 KR";
+    const vatRate = Number.parseFloat(d.vatRate.replace(",", "."));
     const q = Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
     const net = Number.isFinite(netAmount) && netAmount >= 0 ? netAmount : 0;
     const netUnitPrice = q > 0 ? net / q : 0;
+    const vr = Number.isFinite(vatRate) && vatRate >= 0 ? vatRate : 0;
     return {
       lineNumber,
       name: name || `Pozycja ${lineNumber}`,
       unit,
       quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : q,
       netUnitPrice,
-      vatRate,
+      vatRate: vr,
     };
   });
 }
@@ -309,12 +275,6 @@ function buildPayload(
       values.counterpartyIdentifierCountryCode,
     ),
   };
-  const vatExemption = lineItems.some((line) => line.vatRate === "zw")
-    ? {
-        basisType: values.vatExemptionBasisType,
-        basis: values.vatExemptionBasis.trim(),
-      }
-    : undefined;
   const side = issuerPartyFromParsed(base, issuerNip);
   if (side === "seller") {
     return {
@@ -327,7 +287,6 @@ function buildPayload(
       issueDate: values.issueDate.trim(),
       saleDate: values.saleDate.trim(),
       remarks: values.remarks.trim() || undefined,
-      vatExemption,
       lineItems,
       vatSummary: base.vatSummary,
       totals: base.totals,
@@ -341,7 +300,6 @@ function buildPayload(
     issueDate: values.issueDate.trim(),
     saleDate: values.saleDate.trim(),
     remarks: values.remarks.trim() || undefined,
-    vatExemption,
     lineItems,
     vatSummary: base.vatSummary,
     totals: base.totals,
@@ -432,13 +390,6 @@ function InvoiceFormSections({
 
   const watched = useWatch({ control }) as InvoiceEditFormValues | undefined;
   const identifierType = watched?.counterpartyIdentifierType ?? "nip";
-  const hasZw = watched?.lineItems?.some(
-    (line) => normalizeVatRate(line.vatRate) === "zw",
-  ) ?? false;
-  const hasNp = watched?.lineItems?.some((line) => {
-    const rate = normalizeVatRate(line.vatRate);
-    return rate === "np I" || rate === "np II";
-  }) ?? false;
   const issuerNipForPreview = issuerOptions?.issuerNip ?? "";
   const preview = useMemo(() => {
     if (!watched?.lineItems) return recalcParsedInvoice(initial);
@@ -662,7 +613,7 @@ function InvoiceFormSections({
                 <TableHead>Nazwa</TableHead>
                 <TableHead>Ilość</TableHead>
                 <TableHead>Netto</TableHead>
-                <TableHead>Stawka VAT</TableHead>
+                <TableHead>VAT %</TableHead>
                 <TableHead>Brutto</TableHead>
                 <TableHead />
               </TableRow>
@@ -706,30 +657,12 @@ function InvoiceFormSections({
                         inputMode="decimal"
                       />
                     </TableCell>
-                    <TableCell className="min-w-[230px]">
-                      <Controller
-                        control={control}
-                        name={`lineItems.${i}.vatRate`}
-                        render={({ field: vatField }) => (
-                          <Select value={vatField.value} onValueChange={vatField.onChange}>
-                            <SelectTrigger aria-label={`Stawka VAT pozycji ${i + 1}`}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {VAT_RATE_OPTIONS.map((option) => (
-                                <SelectItem key={option.value} value={option.value}>
-                                  {option.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        )}
+                    <TableCell className="min-w-[72px]">
+                      <Input
+                        {...register(`lineItems.${i}.vatRate`)}
+                        className="w-16"
+                        inputMode="decimal"
                       />
-                      {errors.lineItems?.[i]?.vatRate && (
-                        <p className="text-destructive mt-1 text-xs">
-                          {errors.lineItems[i]?.vatRate?.message}
-                        </p>
-                      )}
                     </TableCell>
                     <TableCell>
                       {computed ? computed.grossAmount.toFixed(2) : "—"}
@@ -772,58 +705,6 @@ function InvoiceFormSections({
           </Button>
         </CardContent>
       </Card>
-
-      {hasZw && (
-        <Card className="overflow-hidden border-amber-500/50 shadow-sm">
-          <CardHeader className="border-b border-amber-500/30 bg-amber-500/5">
-            <CardTitle className="text-lg">Podstawa zwolnienia z VAT</CardTitle>
-            <CardDescription>
-              Wymagana przez FA(3), gdy co najmniej jedna pozycja ma stawkę ZW.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Controller
-              control={control}
-              name="vatExemptionBasisType"
-              render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange}>
-                  <SelectTrigger className="max-w-xl" aria-label="Rodzaj podstawy zwolnienia">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="law">Przepis ustawy lub aktu wykonawczego</SelectItem>
-                    <SelectItem value="directive">Przepis dyrektywy UE</SelectItem>
-                    <SelectItem value="other">Inna podstawa prawna</SelectItem>
-                  </SelectContent>
-                </Select>
-              )}
-            />
-            <Textarea
-              {...register("vatExemptionBasis")}
-              rows={3}
-              maxLength={256}
-              placeholder="Wpisz konkretny przepis albo inną podstawę zwolnienia"
-              aria-label="Treść podstawy zwolnienia z VAT"
-            />
-            {errors.vatExemptionBasis && (
-              <p className="text-destructive text-xs">{errors.vatExemptionBasis.message}</p>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {hasNp && (
-        <Card className="border-blue-500/40 bg-blue-500/5 shadow-none">
-          <CardHeader>
-            <CardTitle className="text-lg">Sprzedaż niepodlegająca VAT</CardTitle>
-            <CardDescription>
-              NP I oznacza sprzedaż poza terytorium kraju inną niż usługi z art. 100
-              ust. 1 pkt 4. NP II wybierz dla tych usług świadczonych na terytorium UE.
-              Wybrany wariant jest zapisywany bezpośrednio w pozycji FA(3).
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      )}
 
       <Card className="overflow-hidden shadow-sm">
         <CardHeader className="border-b bg-muted/25">
