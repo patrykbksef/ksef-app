@@ -1,4 +1,5 @@
 import { notFound, redirect } from "next/navigation";
+import { Braces, CircleAlert } from "lucide-react";
 import {
   Accordion,
   AccordionContent,
@@ -89,10 +90,10 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
       inv.data.status === "error");
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 pb-8">
       {!data ? (
-        <>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+          <div className="bg-gradient-to-br from-primary/10 via-transparent to-sky-500/5 p-5 md:p-6">
             <InvoiceDetailTitleBlock
               fileName={inv.data.file_name}
               status={inv.data.status}
@@ -100,8 +101,11 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
               errorMessage={inv.data.error_message}
             />
           </div>
-          <p className="text-muted-foreground text-sm">Brak sparsowanych danych.</p>
-        </>
+          <div className="flex items-start gap-3 border-t p-5 text-muted-foreground md:p-6">
+            <CircleAlert className="mt-0.5 size-5 shrink-0" />
+            <p className="text-sm">Nie udało się odczytać danych z tego dokumentu.</p>
+          </div>
+        </section>
       ) : (
         <>
           <InvoiceDetailPageClient
@@ -120,9 +124,9 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
           {issuerOptions && isComplete ? (
             <KsefPayloadPreview data={data as ParsedInvoice} issuer={issuerOptions} />
           ) : !issuerOptions ? (
-            <Card>
+            <Card className="border-amber-500/40 bg-amber-500/5 shadow-none">
               <CardHeader>
-                <CardTitle>KSeF — podgląd payloadu</CardTitle>
+                <CardTitle className="text-lg">Podgląd danych KSeF jest niedostępny</CardTitle>
                 <CardDescription>
                   Uzupełnij w Ustawieniach NIP, token KSeF, nazwę sprzedawcy i
                   adres (linia 1), aby zobaczyć dane wysyłane do generatora FA(3).
@@ -134,13 +138,18 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
       )}
 
       {inv.data.xml_content ? (
-        <Accordion type="single" collapsible className="w-full">
-          <AccordionItem value="xml">
-            <AccordionTrigger>
-              Podgląd XML FA(3) (wysłany do KSeF)
+        <Accordion type="single" collapsible className="overflow-hidden rounded-xl border bg-card shadow-sm">
+          <AccordionItem value="xml" className="border-0">
+            <AccordionTrigger className="px-5 py-4 hover:no-underline md:px-6">
+              <span className="flex items-center gap-3">
+                <span className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <Braces className="size-4" />
+                </span>
+                XML FA(3) wysłany do KSeF
+              </span>
             </AccordionTrigger>
-            <AccordionContent>
-              <pre className="bg-muted max-h-[480px] overflow-auto rounded-md p-4 text-xs whitespace-pre-wrap">
+            <AccordionContent className="border-t px-5 pt-4 md:px-6">
+              <pre className="bg-muted max-h-[480px] overflow-auto rounded-lg p-4 text-xs whitespace-pre-wrap">
                 {inv.data.xml_content}
               </pre>
             </AccordionContent>

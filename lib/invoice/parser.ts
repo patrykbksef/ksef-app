@@ -1,8 +1,10 @@
 import {
-  parsedInvoiceSchema,
+  ksefReadyInvoiceSchema,
   partialParsedInvoiceSchema,
+  normalizeVatRate,
   type ParsedInvoice,
   type PartialParsedInvoice,
+  type VatRate,
 } from "@/lib/validations/invoice";
 import { isValidNipChecksum } from "@/lib/validations/profile";
 import { mergeLeadingNameLinesFromAddress } from "@/lib/invoice/party-name-address";
@@ -57,7 +59,7 @@ function parseInterRiskTableRow(
   quantity: number;
   netUnitPrice: number;
   netAmount: number;
-  vatRate: number;
+  vatRate: VatRate;
   vatAmount: number;
   grossAmount: number;
 } | null {
@@ -66,7 +68,7 @@ function parseInterRiskTableRow(
   const netUnitPrice = parsePlNumber(`${m[2]}${m[3]}`);
   const quantity = parsePlNumber(m[6]!);
   const netAmount = parsePlNumber(m[7]!);
-  const vatRate = parsePlNumber(m[8]!);
+  const vatRate = normalizeVatRate(parsePlNumber(m[8]!));
   const vatAmount = parsePlNumber(m[9]!);
   const grossAmount = parsePlNumber(m[10]!);
   const name = m[1]!.trim();
@@ -77,7 +79,7 @@ function parseInterRiskTableRow(
     !Number.isFinite(netUnitPrice) ||
     !Number.isFinite(quantity) ||
     !Number.isFinite(netAmount) ||
-    !Number.isFinite(vatRate) ||
+    vatRate === null ||
     !Number.isFinite(vatAmount) ||
     !Number.isFinite(grossAmount)
   ) {
@@ -377,20 +379,27 @@ function parseLineItemLine(line: string, lineNumber: number) {
 
   const gross = parsePlNumber(parts[parts.length - 1]!);
   const vatAmt = parsePlNumber(parts[parts.length - 2]!);
-  const vatRate = parsePlNumber(parts[parts.length - 3]!);
-  const netAmt = parsePlNumber(parts[parts.length - 4]!);
-  const qty = parsePlNumber(parts[parts.length - 5]!);
-  const unit = parts[parts.length - 6]!;
-  void parsePlNumber(parts[parts.length - 7]!); // Lp. column (line number), skip
-  const netUnitPrice = parsePlNumber(parts[parts.length - 8]!);
-  const name = parts.slice(0, parts.length - 8).join(" ");
+  let rateStart = parts.length - 3;
+  if (
+    /^i{1,2}$/i.test(parts[rateStart] ?? "") &&
+    /^np$/i.test(parts[rateStart - 1] ?? "")
+  ) {
+    rateStart -= 1;
+  }
+  const vatRate = normalizeVatRate(parts.slice(rateStart, parts.length - 2).join(" "));
+  const netAmt = parsePlNumber(parts[rateStart - 1]!);
+  const qty = parsePlNumber(parts[rateStart - 2]!);
+  const unit = parts[rateStart - 3]!;
+  void parsePlNumber(parts[rateStart - 4]!); // Lp. column (line number), skip
+  const netUnitPrice = parsePlNumber(parts[rateStart - 5]!);
+  const name = parts.slice(0, rateStart - 5).join(" ");
 
   if (
     !name ||
     !Number.isFinite(gross) ||
     !Number.isFinite(netAmt) ||
     !Number.isFinite(vatAmt) ||
-    !Number.isFinite(vatRate) ||
+    vatRate === null ||
     !Number.isFinite(qty) ||
     !Number.isFinite(netUnitPrice)
   ) {
@@ -424,7 +433,7 @@ function parseEuropAssistanceTotalsRow(
   quantity: number;
   netUnitPrice: number;
   netAmount: number;
-  vatRate: number;
+  vatRate: VatRate;
   vatAmount: number;
   grossAmount: number;
 } | null {
@@ -435,11 +444,19 @@ function parseEuropAssistanceTotalsRow(
 
   const gross = parsePlNumber(parts[parts.length - 1]!);
   const vatAmt = parsePlNumber(parts[parts.length - 2]!);
-  const vatRate = parsePlNumber(parts[parts.length - 3]!);
-  const netAmt = parsePlNumber(parts[parts.length - 4]!);
-  const netUnit = parsePlNumber(parts[parts.length - 5]!);
-  const qty = parsePlNumber(parts[parts.length - 6]!);
-  let name = parts.slice(0, parts.length - 6).join(" ");
+  let rateStart = parts.length - 3;
+  if (
+    /^i{1,2}$/i.test(parts[rateStart] ?? "") &&
+    /^np$/i.test(parts[rateStart - 1] ?? "")
+  ) {
+    rateStart -= 1;
+  }
+  const rawVatRate = parts.slice(rateStart, parts.length - 2).join(" ");
+  const vatRate = normalizeVatRate(rawVatRate);
+  const netAmt = parsePlNumber(parts[rateStart - 1]!);
+  const netUnit = parsePlNumber(parts[rateStart - 2]!);
+  const qty = parsePlNumber(parts[rateStart - 3]!);
+  let name = parts.slice(0, rateStart - 3).join(" ");
   name = name.replace(/^\d+\s+/, "").trim();
 
   if (
@@ -447,12 +464,11 @@ function parseEuropAssistanceTotalsRow(
     !Number.isFinite(gross) ||
     !Number.isFinite(netAmt) ||
     !Number.isFinite(vatAmt) ||
-    !Number.isFinite(vatRate) ||
+    vatRate === null ||
     !Number.isFinite(qty) ||
     !Number.isFinite(netUnit) ||
     qty <= 0 ||
-    vatRate < 0 ||
-    vatRate > 100
+    (typeof vatRate === "number" && (vatRate < 0 || vatRate > 100))
   ) {
     return null;
   }
@@ -477,12 +493,12 @@ function parseVatSummaryAndTotals(text: string) {
   const rateBlock = /(\d+(?:[.,]\d+)?)%\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)/g;
   let m: RegExpExecArray | null;
   while ((m = rateBlock.exec(text)) !== null) {
-    const rate = parsePlNumber(m[1]!);
+    const rate = normalizeVatRate(parsePlNumber(m[1]!));
     const a = parsePlNumber(m[2]!);
     const b = parsePlNumber(m[3]!);
     const c = parsePlNumber(m[4]!);
     if (m[0].includes("-") && m[2] === "-" && m[3] === "-") continue;
-    if (!Number.isFinite(rate)) continue;
+    if (rate === null) continue;
     vatSummary.push({
       vatRate: rate,
       netAmount: a,
@@ -696,7 +712,7 @@ export function parseInterRiskInvoiceTextLenient(
   const bank = buyerNip ? extractBank(text, buyerNip) : {};
 
   const vatSummaryFromLines = (): ParsedInvoice["vatSummary"] => {
-    const map = new Map<number, { net: number; vat: number; gross: number }>();
+    const map = new Map<VatRate, { net: number; vat: number; gross: number }>();
     for (const i of lineItems) {
       const e = map.get(i.vatRate) ?? { net: 0, vat: 0, gross: 0 };
       e.net += i.netAmount;
@@ -765,7 +781,7 @@ export function parseInterRiskInvoiceTextLenient(
     throw new Error(`Walidacja sparsowanej faktury nie powiodła się: ${parsed.error.message}`);
   }
 
-  const complete = missingFields.length === 0 && parsedInvoiceSchema.safeParse(parsed.data).success;
+  const complete = missingFields.length === 0 && ksefReadyInvoiceSchema.safeParse(parsed.data).success;
 
   return { invoice: parsed.data, complete, missingFields };
 }

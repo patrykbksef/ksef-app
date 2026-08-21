@@ -39,17 +39,24 @@ export class AiProvidersExhaustedError extends Error {
   }
 }
 
-const SYSTEM_PROMPT = `You extract structured data from Polish VAT invoices (faktury VAT) in PDF form.
-Output must strictly match the JSON schema: Polish NIP is always exactly 10 digits.
+const SYSTEM_PROMPT = `You extract structured data from VAT invoices (faktury VAT) in PDF form.
+Output must strictly match the JSON schema.
 Dates: ISO 8601 calendar dates only (YYYY-MM-DD).
 Currency is PLN only.
 - seller = sprzedawca / wystawca; buyer = nabywca / nabywca towaru.
+- For each party identify the tax identifier exactly as printed:
+  - Polish NIP: identifierType="nip", identifierValue=10 digits, nip=the same 10 digits.
+  - EU VAT number: identifierType="vat_ue", identifierCountryCode=two-letter prefix, identifierValue=number without that prefix, nip="".
+  - Other foreign tax identifier: identifierType="other", identifierValue=the identifier, optional identifierCountryCode, nip="".
+  - No tax identifier printed: identifierType="none", identifierValue="", nip="".
 - lineItems: every row from the positions table; lineNumber starts at 1 and increases.
-- Each line: name, unit (e.g. szt., km., kg), quantity, netUnitPrice, netAmount, vatRate (percentage), vatAmount, grossAmount.
+- Each line: name, unit (e.g. szt., km., kg), quantity, netUnitPrice, netAmount, vatRate, vatAmount, grossAmount.
+- vatRate must be one of: 23, 22, 8, 7, 5, 4, 3, "0 KR", "0 WDT", "0 EX", "zw", "oo", "np I", "np II". Do not convert ZW or NP to numeric zero. A plain NP should be "np I" unless the document clearly identifies EU services under art. 100(1)(4), which are "np II".
+- If a ZW line is present and the invoice prints a legal exemption basis, return vatExemption with basisType="law", "directive", or "other" and copy that basis. If no basis is printed, omit vatExemption; never invent a legal basis.
 - vatSummary: aggregate by VAT rate (net, VAT, gross per rate).
 - totals: sum net, sum VAT, sum gross (should match invoice if visible).
 - addressLines: array of non-empty address lines without redundant NIP lines.
-If the document is not a Polish VAT invoice, still fill fields as best as possible; never invent NIPs — use only digits present on the document.`;
+If the document is not a Polish VAT invoice, still fill fields as best as possible; never invent tax identifiers.`;
 
 const USER_PROMPT_PDF =
   "Przeanalizuj załączony plik PDF faktury i zwróć dane zgodnie ze schematem ParsedInvoice.";

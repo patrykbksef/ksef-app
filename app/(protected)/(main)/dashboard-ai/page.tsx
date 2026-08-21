@@ -1,5 +1,5 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Sparkles } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import {
   profileReadyForKsefXml,
@@ -7,22 +7,11 @@ import {
 } from "@/lib/validations/profile";
 import { DashboardAiUpload } from "./upload-form";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { invoiceStatusLabel } from "@/lib/i18n/pl";
+  DashboardAlert,
+  InvoiceDashboardHero,
+  InvoiceUploadPanel,
+  RecentLocalInvoicesCard,
+} from "@/components/invoice/invoice-dashboard-ui";
 import { KsefRecentInvoicesCard } from "../dashboard/ksef-recent-invoices";
 
 export default async function DashboardAiPage() {
@@ -62,122 +51,43 @@ export default async function DashboardAiPage() {
 
   const uploadBlockedByVerification = !verified && (totalInvoiceCount ?? 0) >= 1;
   const canUpload = profileComplete && !uploadBlockedByVerification;
+  const environment = p?.ksef_environment === "production" ? "production" : "demo";
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Panel (AI)</h1>
-      </div>
+    <div className="space-y-6 pb-8">
+      <InvoiceDashboardHero
+        title="Dodaj fakturę z AI"
+        description="AI odczyta różne układy faktur i przygotuje dane do Twojej weryfikacji przed wysłaniem."
+        environment={environment}
+        icon={Sparkles}
+        tone="ai"
+      />
 
       {!profileComplete ? (
-        <Card className="border-amber-500/50 bg-amber-500/5">
-          <CardHeader>
-            <CardTitle className="text-lg">Uzupełnij profil</CardTitle>
-            <CardDescription>
-              Dodaj NIP, nazwę i adres sprzedawcy oraz token KSeF w Ustawieniach,
-              zanim wgrasz faktury.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ButtonLink href="/settings">Przejdź do ustawień</ButtonLink>
-          </CardContent>
-        </Card>
+        <DashboardAlert title="Dokończ konfigurację firmy" actionHref="/settings" actionLabel="Otwórz ustawienia">
+          Dodaj NIP, nazwę i adres sprzedawcy oraz token KSeF, zanim wgrasz pierwszą fakturę.
+        </DashboardAlert>
       ) : null}
 
       {uploadBlockedByVerification ? (
-        <Card className="border-amber-500/50 bg-amber-500/5">
-          <CardHeader>
-            <CardTitle className="text-lg">Wymagana weryfikacja</CardTitle>
-            <CardDescription>
-              Limit jednej faktury został wykorzystany. Zadzwoń pod{" "}
-              <a href="tel:503758919" className="font-medium underline-offset-2 hover:underline">
-                503 758 919
-              </a>
-              , aby odblokować konto.
-            </CardDescription>
-          </CardHeader>
-        </Card>
+        <DashboardAlert title="Wymagana weryfikacja konta">
+          Limit jednej faktury został wykorzystany. Zadzwoń pod{" "}
+          <a href="tel:503758919" className="font-medium underline-offset-2 hover:underline">503 758 919</a>, aby odblokować konto.
+        </DashboardAlert>
       ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Wgraj fakturę (AI)</CardTitle>
-          <CardDescription>
-            Tylko PDF, maks. 5 MB. Parser AI obsługuje różne szablony — sprawdź
-            dane przed wysyłką do KSeF.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <DashboardAiUpload disabled={!canUpload} />
-        </CardContent>
-      </Card>
+      <InvoiceUploadPanel
+        title="Wgraj dokument do analizy AI"
+        description="AI obsługuje różne szablony. Po odczytaniu zawsze sprawdź dane przed wysyłką."
+        icon={Sparkles}
+        tone="ai"
+      >
+        <DashboardAiUpload disabled={!canUpload} />
+      </InvoiceUploadPanel>
 
       <KsefRecentInvoicesCard profileComplete={profileComplete} />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Ostatnie faktury</CardTitle>
-          <CardDescription>20 ostatnich plików</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {!invoicesRaw?.length ? (
-            <p className="text-muted-foreground text-sm">Brak faktur.</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Plik</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Ref. KSeF</TableHead>
-                  <TableHead>Utworzono</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {invoicesRaw.map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell>
-                      <Link
-                        href={`/invoices/${row.id}`}
-                        className="text-primary font-medium underline-offset-4 hover:underline"
-                      >
-                        {row.file_name}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary" title={row.status}>
-                        {invoiceStatusLabel(row.status)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="max-w-[180px] truncate font-mono text-xs">
-                      {row.ksef_reference ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {new Date(row.created_at).toLocaleString()}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      <RecentLocalInvoicesCard invoices={invoicesRaw ?? null} />
     </div>
-  );
-}
-
-function ButtonLink({
-  href,
-  children,
-}: {
-  href: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <Link
-      href={href}
-      className="bg-primary text-primary-foreground inline-flex h-9 items-center justify-center rounded-md px-4 text-sm font-medium"
-    >
-      {children}
-    </Link>
   );
 }

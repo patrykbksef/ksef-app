@@ -61,7 +61,9 @@ async function ksefJson<T>(baseUrl: string, path: string, init: RequestInit & { 
         bodyPreview: text.slice(0, 4000),
         parsed: typeof data === "object" ? data : undefined,
       });
-      const err = new Error(
+      const err = new KsefHttpError(
+        res.status,
+        path,
         `KSeF HTTP ${res.status}: ${typeof data === "object" && data && "exception" in data ? JSON.stringify((data as { exception?: unknown }).exception) : text.slice(0, 500)}`,
       );
       throw err;
@@ -125,6 +127,30 @@ type RedeemRes = {
   accessToken: { token: string };
 };
 
+export class KsefConnectionTestError extends Error {
+  constructor(
+    public readonly code:
+      | "AUTHENTICATION_FAILED"
+      | "INVOICE_WRITE_MISSING"
+      | "SERVICE_UNAVAILABLE",
+    options?: ErrorOptions,
+  ) {
+    super(code, options);
+    this.name = "KsefConnectionTestError";
+  }
+}
+
+class KsefHttpError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly path: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "KsefHttpError";
+  }
+}
+
 /**
  * Authenticate with KSeF API 2.0 using a KSeF token + NIP.
  * @param baseUrl e.g. from {@link ksefApiBaseUrl}
@@ -183,19 +209,11 @@ export async function authenticateWithKsefToken(nip: string, ksefToken: string, 
   return redeem.accessToken.token;
 }
 
-/**
- * Send FA(3) invoice XML to KSeF using token authentication (demo or production API).
- */
-export async function sendInvoiceToKsefWithToken(options: {
-  contextNip: string;
-  ksefToken: string;
-  invoiceXml: string;
-  ksefEnvironment: KsefEnvironment;
-}): Promise<KsefSendResult> {
-  const baseUrl = ksefApiBaseUrl(options.ksefEnvironment);
-
-  const accessToken = await authenticateWithKsefToken(options.contextNip, options.ksefToken, baseUrl);
-
+async function openOnlineSession(baseUrl: string, accessToken: string): Promise<{
+  sessionRef: string;
+  symmetricKey: Buffer;
+  iv: Buffer;
+}> {
   const publicCerts = await ksefJson<PublicCert[]>(baseUrl, "/security/public-key-certificates", {
     method: "GET",
   });
@@ -211,7 +229,7 @@ export async function sendInvoiceToKsefWithToken(options: {
     symmetricKey,
   );
 
-  const sessionOpen = await ksefJson<{ referenceNumber: string }>(baseUrl, "/sessions/online", {
+  const session = await ksefJson<{ referenceNumber: string }>(baseUrl, "/sessions/online", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -230,7 +248,75 @@ export async function sendInvoiceToKsefWithToken(options: {
     }),
   });
 
-  const sessionRef = sessionOpen.referenceNumber;
+  return { sessionRef: session.referenceNumber, symmetricKey, iv };
+}
+
+async function closeOnlineSession(baseUrl: string, accessToken: string, sessionRef: string): Promise<void> {
+  await ksefJson(baseUrl, `/sessions/online/${encodeURIComponent(sessionRef)}/close`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+}
+
+/**
+ * Verify that a token authenticates in the supplied NIP context and can open an
+ * invoice session. Opening the empty session confirms InvoiceWrite without
+ * transmitting an invoice; the session is closed immediately afterwards.
+ */
+export async function testKsefInvoiceWriteAccess(options: {
+  contextNip: string;
+  ksefToken: string;
+  ksefEnvironment: KsefEnvironment;
+}): Promise<void> {
+  const baseUrl = ksefApiBaseUrl(options.ksefEnvironment);
+  let accessToken: string;
+
+  try {
+    accessToken = await authenticateWithKsefToken(options.contextNip, options.ksefToken, baseUrl);
+  } catch (error) {
+    if (
+      (error instanceof KsefHttpError && [400, 401, 403].includes(error.status)) ||
+      (error instanceof Error && /^Auth failed/.test(error.message))
+    ) {
+      throw new KsefConnectionTestError("AUTHENTICATION_FAILED", { cause: error });
+    }
+    throw new KsefConnectionTestError("SERVICE_UNAVAILABLE", { cause: error });
+  }
+
+  let sessionRef: string;
+  try {
+    ({ sessionRef } = await openOnlineSession(baseUrl, accessToken));
+  } catch (error) {
+    if (error instanceof KsefHttpError && error.status === 403) {
+      throw new KsefConnectionTestError("INVOICE_WRITE_MISSING", { cause: error });
+    }
+    throw new KsefConnectionTestError("SERVICE_UNAVAILABLE", { cause: error });
+  }
+
+  try {
+    await closeOnlineSession(baseUrl, accessToken, sessionRef);
+  } catch (error) {
+    console.warn("[KSeF connection test] could not close empty session", {
+      scope: "ksef.connection-test",
+      sessionRef,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
+/**
+ * Send FA(3) invoice XML to KSeF using token authentication (demo or production API).
+ */
+export async function sendInvoiceToKsefWithToken(options: {
+  contextNip: string;
+  ksefToken: string;
+  invoiceXml: string;
+  ksefEnvironment: KsefEnvironment;
+}): Promise<KsefSendResult> {
+  const baseUrl = ksefApiBaseUrl(options.ksefEnvironment);
+
+  const accessToken = await authenticateWithKsefToken(options.contextNip, options.ksefToken, baseUrl);
+  const { sessionRef, symmetricKey, iv } = await openOnlineSession(baseUrl, accessToken);
   const enc = encryptInvoicePayload(options.invoiceXml, symmetricKey, iv);
 
   const invoiceSend = await ksefJson<{ referenceNumber: string }>(
@@ -256,10 +342,7 @@ export async function sendInvoiceToKsefWithToken(options: {
   const invoiceRef = invoiceSend.referenceNumber;
 
   try {
-    await ksefJson(baseUrl, `/sessions/online/${encodeURIComponent(sessionRef)}/close`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    await closeOnlineSession(baseUrl, accessToken, sessionRef);
   } catch {
     /* best-effort */
   }

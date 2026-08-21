@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { DatabaseZap } from "lucide-react";
 import {
   Accordion,
   AccordionContent,
@@ -11,6 +12,10 @@ import {
   type BuildFa3XmlOptions,
 } from "@/lib/invoice/xml-builder";
 import type { ParsedInvoice } from "@/lib/validations/invoice";
+import {
+  partyTaxIdentifierLabel,
+  resolvePartyTaxIdentifier,
+} from "@/lib/invoice/party-tax-identifier";
 import { formatIsoDatePl } from "@/lib/utils";
 
 function formatKsefDate(d: Date | string): string {
@@ -41,7 +46,7 @@ function PayloadRow({
     <div className="border-border/60 grid gap-1 border-b py-2 text-sm last:border-0 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] md:items-start md:gap-4">
       <div className="min-w-0">
         <div className="font-medium">{pl}</div>
-        <div className="text-muted-foreground font-mono text-sm leading-snug">
+        <div className="text-muted-foreground font-mono text-xs leading-snug">
           ({path} → {xml})
         </div>
       </div>
@@ -61,16 +66,22 @@ export function KsefPayloadPreview({
 }) {
   const input = buildKsefLiteInvoiceInput(data, issuer);
   const podmiot2Src = podmiot2CounterpartyFromParsed(data, issuer.issuerNip);
+  const podmiot2Identifier = resolvePartyTaxIdentifier(podmiot2Src);
   const pay = input.details.payment;
   const addInfo = input.details.additionalInfo;
 
   return (
-    <Accordion type="single" collapsible className="w-full">
-      <AccordionItem value="ksef-lite-input">
-        <AccordionTrigger className="text-left hover:no-underline">
-          Dane przekazywane do KSeF (wejście ksef-lite)
+    <Accordion type="single" collapsible className="overflow-hidden rounded-xl border bg-card shadow-sm">
+      <AccordionItem value="ksef-lite-input" className="border-0">
+        <AccordionTrigger className="px-5 py-4 text-left hover:no-underline md:px-6">
+          <span className="flex items-center gap-3">
+            <span className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <DatabaseZap className="size-4" />
+            </span>
+            Dane przygotowane do wysłania do KSeF
+          </span>
         </AccordionTrigger>
-        <AccordionContent>
+        <AccordionContent className="border-t px-5 pt-5 md:px-6">
           <p className="text-muted-foreground mb-6 text-sm leading-relaxed">
             Wartości wysyłane do generatora FA(3).{" "}
             <strong className="text-foreground">Sprzedawca (Podmiot1)</strong> —
@@ -116,10 +127,18 @@ export function KsefPayloadPreview({
         <div>
           <h3 className="mb-1 font-semibold">Nabywca (Podmiot2)</h3>
           <PayloadRow
-            pl="NIP"
-            path="buyer.nip ← kontrahent (druga strona z PDF)"
-            xml="Podmiot2 / DaneIdentyfikacyjne / NIP"
-            value={input.buyer.nip}
+            pl="Identyfikator podatkowy"
+            path="buyer ← kontrahent (druga strona z PDF)"
+            xml={
+              podmiot2Identifier.type === "nip"
+                ? "Podmiot2 / DaneIdentyfikacyjne / NIP"
+                : podmiot2Identifier.type === "vat_ue"
+                  ? "Podmiot2 / DaneIdentyfikacyjne / KodUE + NrVatUE"
+                  : podmiot2Identifier.type === "other"
+                    ? "Podmiot2 / DaneIdentyfikacyjne / KodKraju + NrID"
+                    : "Podmiot2 / DaneIdentyfikacyjne / BrakID"
+            }
+            value={partyTaxIdentifierLabel(podmiot2Src)}
           />
           <PayloadRow
             pl="Nazwa (tylko informacja z PDF — nie w payloadzie)"
@@ -131,7 +150,17 @@ export function KsefPayloadPreview({
             pl="Adres (łączony)"
             path="buyer.address ← adres kontrahenta z PDF"
             xml="Podmiot2 / Adres (KodKraju, AdresL1, AdresL2)"
-            value={input.buyer.address}
+            value={
+              typeof input.buyer.address === "string"
+                ? input.buyer.address
+                : [
+                    input.buyer.address.countryCode,
+                    input.buyer.address.line1,
+                    input.buyer.address.line2,
+                  ]
+                    .filter(Boolean)
+                    .join(", ")
+            }
           />
         </div>
 

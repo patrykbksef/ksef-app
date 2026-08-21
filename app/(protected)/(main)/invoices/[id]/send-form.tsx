@@ -1,6 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
+import { LoaderCircle, Send } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useActionState, useEffect, useRef } from "react";
 import { useFormStatus } from "react-dom";
@@ -34,6 +35,7 @@ function Submit({
       size="lg"
       title={title}
     >
+      {pending ? <LoaderCircle className="animate-spin" /> : <Send />}
       {pending ? "Wysyłanie…" : sendLabel}
     </Button>
   );
