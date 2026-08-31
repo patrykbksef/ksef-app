@@ -7,6 +7,26 @@ export const loginSchema = z.object({
 
 export type LoginInput = z.infer<typeof loginSchema>;
 
+export const passwordResetRequestSchema = z.object({
+  email: z.string().email("Podaj prawidłowy adres e-mail"),
+});
+
+export type PasswordResetRequestInput = z.infer<
+  typeof passwordResetRequestSchema
+>;
+
+export const passwordUpdateSchema = z
+  .object({
+    password: z.string().min(8, "Hasło musi mieć co najmniej 8 znaków"),
+    confirmPassword: z.string().min(1, "Powtórz nowe hasło"),
+  })
+  .refine((values) => values.password === values.confirmPassword, {
+    message: "Hasła muszą być takie same",
+    path: ["confirmPassword"],
+  });
+
+export type PasswordUpdateInput = z.infer<typeof passwordUpdateSchema>;
+
 const requiredTrue = (message: string) =>
   z.boolean().refine((v) => v === true, { message });
 

@@ -39,6 +39,8 @@ export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next") ?? "/dashboard";
+  const passwordUpdated = searchParams.get("password") === "updated";
+  const recoveryLinkExpired = searchParams.get("error") === "recovery";
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [error, setError] = useState<string | null>(null);
 
@@ -119,6 +121,16 @@ export function LoginForm() {
                 {error}
               </p>
             ) : null}
+            {!error && passwordUpdated ? (
+              <p className="text-sm text-emerald-600 dark:text-emerald-400" role="status">
+                Hasło zostało zmienione. Możesz się teraz zalogować.
+              </p>
+            ) : null}
+            {!error && recoveryLinkExpired ? (
+              <p className="text-destructive text-sm" role="alert">
+                Link do zmiany hasła jest nieprawidłowy lub wygasł. Wyślij nowy link.
+              </p>
+            ) : null}
             <FormField
               control={form.control}
               name="email"
@@ -158,6 +170,16 @@ export function LoginForm() {
                 </FormItem>
               )}
             />
+            {mode === "login" ? (
+              <div className="text-right">
+                <Link
+                  href="/forgot-password"
+                  className="text-muted-foreground text-sm underline underline-offset-2 hover:text-foreground"
+                >
+                  Nie pamiętasz hasła?
+                </Link>
+              </div>
+            ) : null}
             {mode === "signup" ? (
               <div className="space-y-3 border-t pt-3">
                 <FormField

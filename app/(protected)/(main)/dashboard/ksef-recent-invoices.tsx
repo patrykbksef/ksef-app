@@ -1,7 +1,9 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 import { CircleAlert, Cloud, Inbox, LoaderCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -21,12 +23,29 @@ import type { KsefInvoiceListRow } from "@/lib/ksef/client";
 import { ksefQueryKeys } from "@/lib/query-keys";
 
 type RecentApiOk = { invoices: KsefInvoiceListRow[]; hasMore: boolean };
+type RecentApiErrorCode = "INVOICE_READ_MISSING";
+
+class KsefRecentInvoicesError extends Error {
+  constructor(
+    message: string,
+    readonly code?: RecentApiErrorCode,
+  ) {
+    super(message);
+    this.name = "KsefRecentInvoicesError";
+  }
+}
 
 async function fetchKsefRecentInvoices(): Promise<RecentApiOk> {
   const res = await fetch("/api/ksef/invoices/recent");
-  const data = (await res.json()) as RecentApiOk & { error?: string };
+  const data = (await res.json()) as RecentApiOk & {
+    code?: RecentApiErrorCode;
+    error?: string;
+  };
   if (!res.ok) {
-    throw new Error(data.error ?? `HTTP ${res.status}`);
+    throw new KsefRecentInvoicesError(
+      data.error ?? `HTTP ${res.status}`,
+      data.code,
+    );
   }
   return { invoices: data.invoices ?? [], hasMore: Boolean(data.hasMore) };
 }
@@ -42,6 +61,9 @@ export function KsefRecentInvoices({ enabled }: { enabled: boolean }) {
     queryKey: ksefQueryKeys.recentInvoices,
     queryFn: fetchKsefRecentInvoices,
     enabled,
+    retry: (failureCount, queryError) =>
+      !(queryError instanceof KsefRecentInvoicesError &&
+        queryError.code === "INVOICE_READ_MISSING") && failureCount < 2,
   });
 
   if (!enabled) {
@@ -63,10 +85,34 @@ export function KsefRecentInvoices({ enabled }: { enabled: boolean }) {
   }
 
   if (isError) {
+    const invoiceReadMissing =
+      error instanceof KsefRecentInvoicesError &&
+      error.code === "INVOICE_READ_MISSING";
+
     return (
       <div className="m-5 flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-destructive">
         <CircleAlert className="mt-0.5 size-5 shrink-0" />
-        <p className="text-sm">{error instanceof Error ? error.message : "Nie udało się pobrać faktur z KSeF"}</p>
+        <div className="space-y-3">
+          <div>
+            <p className="text-sm font-medium">
+              {invoiceReadMissing
+                ? "Token nie pozwala przeglądać faktur"
+                : "Nie udało się pobrać faktur z KSeF"}
+            </p>
+            <p className="mt-1 text-sm">
+              {invoiceReadMissing
+                ? "Wygeneruj token z uprawnieniami InvoiceRead i InvoiceWrite, a następnie zapisz go w Ustawieniach."
+                : error instanceof Error
+                  ? error.message
+                  : "Spróbuj ponownie później."}
+            </p>
+          </div>
+          {invoiceReadMissing ? (
+            <Button asChild size="sm" variant="outline">
+              <Link href="/settings">Otwórz ustawienia</Link>
+            </Button>
+          ) : null}
+        </div>
       </div>
     );
   }

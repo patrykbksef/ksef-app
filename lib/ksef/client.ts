@@ -421,6 +421,14 @@ export type KsefInvoiceListRow = {
   buyerIdentifier: string | null;
 };
 
+/** The authenticated token cannot read invoices in the selected KSeF context. */
+export class KsefInvoiceReadPermissionError extends Error {
+  constructor(options?: ErrorOptions) {
+    super("INVOICE_READ_MISSING", options);
+    this.name = "KsefInvoiceReadPermissionError";
+  }
+}
+
 function pickStr(obj: Record<string, unknown>, keys: string[]): string | null {
   for (const k of keys) {
     const v = obj[k];
@@ -493,15 +501,25 @@ export async function queryRecentKsefInvoicesMetadata(options: {
     },
   };
 
-  const res = await ksefJson<InvoiceMetadataApiResponse>(baseUrl, path, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify(body),
-    timeoutMs: 90_000,
-  });
+  let res: InvoiceMetadataApiResponse;
+  try {
+    res = await ksefJson<InvoiceMetadataApiResponse>(baseUrl, path, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(body),
+      timeoutMs: 90_000,
+    });
+  } catch (error) {
+    // This endpoint requires InvoiceRead. Authentication has already succeeded,
+    // so its 403 response is a definitive permission check for this token.
+    if (error instanceof KsefHttpError && error.status === 403) {
+      throw new KsefInvoiceReadPermissionError({ cause: error });
+    }
+    throw error;
+  }
 
   const raw = res.invoices ?? [];
   const invoices: KsefInvoiceListRow[] = [];

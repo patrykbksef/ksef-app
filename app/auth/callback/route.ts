@@ -14,11 +14,13 @@ export async function GET(request: Request) {
   }
 
   const { code, next } = parsed.data;
+  const isPasswordRecovery = next === "/reset-password";
   const supabase = await createClient();
   const { error } = await supabase.auth.exchangeCodeForSession(code);
 
   if (error) {
-    return NextResponse.redirect(`${origin}/login?error=oauth`);
+    const errorCode = isPasswordRecovery ? "recovery" : "oauth";
+    return NextResponse.redirect(`${origin}/login?error=${errorCode}`);
   }
 
   const safeNext = next?.startsWith("/") ? next : "/dashboard";

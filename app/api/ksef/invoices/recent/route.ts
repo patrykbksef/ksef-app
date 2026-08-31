@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { queryRecentKsefInvoicesMetadata } from "@/lib/ksef/client";
+import {
+  KsefInvoiceReadPermissionError,
+  queryRecentKsefInvoicesMetadata,
+} from "@/lib/ksef/client";
 import { resolveKsefEnvironment } from "@/lib/ksef/config";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -47,6 +50,17 @@ export async function GET() {
     });
     return NextResponse.json({ invoices, hasMore });
   } catch (e) {
+    if (e instanceof KsefInvoiceReadPermissionError) {
+      return NextResponse.json(
+        {
+          code: "INVOICE_READ_MISSING",
+          error:
+            "Token KSeF nie ma uprawnienia do przeglądania faktur (InvoiceRead).",
+        },
+        { status: 403 },
+      );
+    }
+
     const msg = e instanceof Error ? e.message : "Błąd zapytania do KSeF";
     return NextResponse.json({ error: msg }, { status: 502 });
   }
