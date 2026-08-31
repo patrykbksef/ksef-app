@@ -1,7 +1,6 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { LoaderCircle, RotateCcw, Save } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   useActionState,
@@ -12,7 +11,6 @@ import {
   useTransition,
 } from "react";
 import {
-  Controller,
   FormProvider,
   useFieldArray,
   useForm,
@@ -40,19 +38,7 @@ import {
 } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { recalcParsedInvoice } from "@/lib/invoice/recalc-parsed-invoice";
-import {
-  partyTaxIdentifierLabel,
-  resolvePartyTaxIdentifier,
-  taxIdentifierFields,
-} from "@/lib/invoice/party-tax-identifier";
 import { REMARKS_PREFIX_TEXT_LS_KEY } from "@/lib/invoice/remarks-lookup-from-pdf";
 import type { KsefEnvironment } from "@/lib/ksef/config";
 import {
@@ -90,9 +76,10 @@ const lineDraftSchema = z.object({
 
 const invoiceEditFormSchema = z.object({
   counterpartyName: z.string().min(1, "Wymagana nazwa"),
-  counterpartyIdentifierType: z.enum(["nip", "vat_ue", "other", "none"]),
-  counterpartyIdentifierValue: z.string(),
-  counterpartyIdentifierCountryCode: z.string(),
+  counterpartyNip: z
+    .string()
+    .min(1, "Wymagany NIP")
+    .regex(/^\d{10}$/, "NIP musi mieć 10 cyfr"),
   counterpartyAddress: z.string(),
   invoiceNumber: z.string().min(1, "Wymagany numer"),
   issueDate: z
@@ -105,25 +92,6 @@ const invoiceEditFormSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Format: YYYY-MM-DD"),
   remarks: z.string(),
   lineItems: z.array(lineDraftSchema).min(1, "Co najmniej jedna pozycja"),
-}).superRefine((values, ctx) => {
-  const type = values.counterpartyIdentifierType;
-  const value = values.counterpartyIdentifierValue.trim().toUpperCase();
-  const country = values.counterpartyIdentifierCountryCode.trim().toUpperCase();
-
-  if (type === "nip" && !/^\d{10}$/.test(value.replace(/\D/g, ""))) {
-    ctx.addIssue({ code: "custom", path: ["counterpartyIdentifierValue"], message: "NIP musi mieć 10 cyfr" });
-  }
-  if (type === "vat_ue") {
-    if (!/^[A-Z]{2}$/.test(country)) {
-      ctx.addIssue({ code: "custom", path: ["counterpartyIdentifierCountryCode"], message: "Kod kraju musi mieć 2 litery" });
-    }
-    if (!/^[A-Z0-9+*]{1,12}$/.test(value)) {
-      ctx.addIssue({ code: "custom", path: ["counterpartyIdentifierValue"], message: "Nieprawidłowy numer VAT UE" });
-    }
-  }
-  if (type === "other" && !/^[A-Z0-9+*\-\.]{1,50}$/.test(value)) {
-    ctx.addIssue({ code: "custom", path: ["counterpartyIdentifierValue"], message: "Wpisz identyfikator podatkowy" });
-  }
 });
 
 export type InvoiceEditFormValues = z.infer<typeof invoiceEditFormSchema>;
@@ -167,13 +135,11 @@ function toFormValues(
   issuerNip: string,
 ): InvoiceEditFormValues {
   const counterparty = podmiot2CounterpartyFromParsed(p, issuerNip);
-  const identifier = resolvePartyTaxIdentifier(counterparty);
   const drafts = toLineDrafts(p.lineItems);
+  const nipDigits = counterparty.nip.replace(/\D/g, "").slice(0, 10);
   return {
     counterpartyName: counterparty.name,
-    counterpartyIdentifierType: identifier.type,
-    counterpartyIdentifierValue: identifier.value,
-    counterpartyIdentifierCountryCode: identifier.countryCode ?? "",
+    counterpartyNip: nipDigits,
     counterpartyAddress: counterparty.addressLines.join("\n"),
     invoiceNumber: p.invoiceNumber,
     issueDate: p.issueDate,
@@ -243,10 +209,7 @@ function ensureIssuerParty(
   if (nip.length === 10) return withName;
   const fromProfile = issuerNip.replace(/\D/g, "").slice(0, 10);
   return fromProfile.length === 10
-    ? {
-        ...withName,
-        ...taxIdentifierFields("nip", fromProfile),
-      }
+    ? { ...withName, nip: fromProfile }
     : withName;
 }
 
@@ -266,14 +229,11 @@ function buildPayload(
     .split("\n")
     .map((s) => s.trim())
     .filter(Boolean);
+  const nip = values.counterpartyNip.trim().replace(/\D/g, "").slice(0, 10);
   const editedParty = {
     name: values.counterpartyName.trim(),
+    nip: nip.length === 10 ? nip : values.counterpartyNip.trim(),
     addressLines: addrLines,
-    ...taxIdentifierFields(
-      values.counterpartyIdentifierType,
-      values.counterpartyIdentifierValue,
-      values.counterpartyIdentifierCountryCode,
-    ),
   };
   const side = issuerPartyFromParsed(base, issuerNip);
   if (side === "seller") {
@@ -333,15 +293,9 @@ function InvoiceFormSections({
       if (path.includes("invoiceNumber") && !initial.invoiceNumber) labels.push("Numer faktury");
       else if (path.includes("issueDate") && !initial.issueDate) labels.push("Data wystawienia");
       else if (path.includes("saleDate") && !initial.saleDate) labels.push("Data sprzedaży");
-      else if (
-        path.includes("seller.identifier") ||
-        (path.includes("seller.nip") && !initial.seller.nip)
-      ) labels.push("Identyfikator podatkowy sprzedawcy");
+      else if (path.includes("seller.nip") && !initial.seller.nip) labels.push("NIP sprzedawcy");
       else if (path.includes("seller.name") && !initial.seller.name) labels.push("Nazwa sprzedawcy");
-      else if (
-        path.includes("buyer.identifier") ||
-        (path.includes("buyer.nip") && !initial.buyer.nip)
-      ) labels.push("Identyfikator podatkowy nabywcy");
+      else if (path.includes("buyer.nip") && !initial.buyer.nip) labels.push("NIP nabywcy");
       else if (path.includes("buyer.name") && !initial.buyer.name) labels.push("Nazwa nabywcy");
       else if (path.includes("lineItems") && initial.lineItems.length === 0) labels.push("Pozycje faktury");
     }
@@ -389,7 +343,6 @@ function InvoiceFormSections({
   }
 
   const watched = useWatch({ control }) as InvoiceEditFormValues | undefined;
-  const identifierType = watched?.counterpartyIdentifierType ?? "nip";
   const issuerNipForPreview = issuerOptions?.issuerNip ?? "";
   const preview = useMemo(() => {
     if (!watched?.lineItems) return recalcParsedInvoice(initial);
@@ -409,12 +362,12 @@ function InvoiceFormSections({
   return (
     <>
       {missingFieldLabels.length > 0 && (
-        <Card className="border-amber-500/40 bg-amber-500/5 shadow-none">
-          <CardHeader className="p-5">
-            <CardTitle className="text-lg text-amber-800 dark:text-amber-200">
+        <Card className="border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/20">
+          <CardHeader>
+            <CardTitle className="text-yellow-800 dark:text-yellow-200">
               Niekompletne dane z PDF
             </CardTitle>
-            <CardDescription className="text-amber-700 dark:text-amber-300">
+            <CardDescription className="text-yellow-700 dark:text-yellow-300">
               Nie udało się odczytać: {missingFieldLabels.join(", ")}.
               Uzupełnij brakujące pola i zapisz, aby móc wysłać fakturę do KSeF.
             </CardDescription>
@@ -422,16 +375,18 @@ function InvoiceFormSections({
         </Card>
       )}
 
-      <Card className="overflow-hidden shadow-sm">
-        <CardHeader className="border-b bg-muted/25">
-          <CardTitle className="text-lg">Strony faktury</CardTitle>
+      <Card>
+        <CardHeader>
+          <CardTitle>Strony</CardTitle>
           <CardDescription>
-            Dane sprzedawcy pochodzą z ustawień. Poniżej możesz poprawić dane
-            kontrahenta wysyłane do KSeF jako Podmiot2.
+            Podmiot1 w KSeF — z profilu (Twój NIP). Podmiot2 — kontrahent (druga
+            strona transakcji): wybierany po porównaniu NIP z profilu ze
+            sprzedawcą i nabywcą z PDF (jeśli Twój NIP = sprzedawca na PDF, do KSeF
+            idzie nabywca z PDF i odwrotnie).
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 p-5 md:grid-cols-2 md:p-6">
-          <div className="space-y-6 rounded-xl border bg-background p-4">
+        <CardContent className="grid gap-8 md:grid-cols-2">
+          <div className="space-y-6">
             <div>
               <h3 className="mb-2 font-semibold">
                 Sprzedawca (Ty — wysyłane do KSeF)
@@ -478,59 +433,20 @@ function InvoiceFormSections({
                 rows={3}
                 className="text-sm"
               />
-              <div className="grid gap-2 sm:grid-cols-[180px_1fr]">
-                <Controller
-                  control={control}
-                  name="counterpartyIdentifierType"
-                  render={({ field }) => (
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <SelectTrigger aria-label="Rodzaj identyfikatora kontrahenta">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="nip">NIP</SelectItem>
-                        <SelectItem value="vat_ue">VAT UE</SelectItem>
-                        <SelectItem value="other">Inny identyfikator</SelectItem>
-                        <SelectItem value="none">Brak identyfikatora</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
+              <div>
+                <Input
+                  {...register("counterpartyNip")}
+                  aria-label="NIP kontrahenta"
+                  className="font-mono text-sm"
+                  maxLength={13}
                 />
-                {identifierType !== "none" && (
-                  <Input
-                    {...register("counterpartyIdentifierValue")}
-                    aria-label="Identyfikator podatkowy kontrahenta"
-                    className="font-mono text-sm uppercase"
-                    placeholder={identifierType === "nip" ? "10 cyfr" : "Numer identyfikatora"}
-                    maxLength={50}
-                  />
+                {errors.counterpartyNip && (
+                  <p className="text-destructive mt-1 text-xs">{errors.counterpartyNip.message}</p>
                 )}
               </div>
-              {(identifierType === "vat_ue" || identifierType === "other") && (
-                <div>
-                  <Input
-                    {...register("counterpartyIdentifierCountryCode")}
-                    aria-label="Kod kraju identyfikatora kontrahenta"
-                    className="w-28 font-mono uppercase"
-                    placeholder={identifierType === "vat_ue" ? "np. DE" : "Kod kraju"}
-                    maxLength={2}
-                  />
-                  <p className="text-muted-foreground mt-1 text-xs">
-                    {identifierType === "vat_ue"
-                      ? "Kod kraju VAT UE jest wymagany. Numer wpisz bez prefiksu kraju."
-                      : "Kod kraju jest opcjonalny dla innego identyfikatora podatkowego."}
-                  </p>
-                </div>
-              )}
-              {errors.counterpartyIdentifierValue && (
-                <p className="text-destructive text-xs">{errors.counterpartyIdentifierValue.message}</p>
-              )}
-              {errors.counterpartyIdentifierCountryCode && (
-                <p className="text-destructive text-xs">{errors.counterpartyIdentifierCountryCode.message}</p>
-              )}
             </div>
           </div>
-          <div className="space-y-6 rounded-xl border bg-muted/20 p-4">
+          <div className="space-y-6">
             <div>
               <h3 className="mb-2 font-semibold">
                 Kontrahent w KSeF (Podmiot2)
@@ -540,39 +456,43 @@ function InvoiceFormSections({
                 {podmiot2Preview.addressLines.filter(Boolean).join(", ") || "—"}
               </p>
               <p className="mt-1 font-mono text-sm">
-                {partyTaxIdentifierLabel(podmiot2Preview)}
+                NIP{" "}
+                {(() => {
+                  const d = podmiot2Preview.nip.replace(/\D/g, "").slice(0, 10);
+                  return d.length === 10 ? d : podmiot2Preview.nip.trim() || "—";
+                })()}
               </p>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden shadow-sm">
-        <CardHeader className="border-b bg-muted/25">
-          <CardTitle className="text-lg">Dane dokumentu</CardTitle>
+      <Card>
+        <CardHeader>
+          <CardTitle>Faktura (metadane)</CardTitle>
           <CardDescription>
-            Sprawdź numer faktury oraz daty odczytane z dokumentu.
+            Zgodnie z polami dat w dokumencie PDF (ISO w bazie po zapisie)
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-5 p-5 text-sm md:grid-cols-3 md:p-6">
-          <div className="flex flex-col gap-1.5">
+        <CardContent className="space-y-3 text-sm">
+          <div className="flex flex-col gap-1">
             <span className="text-muted-foreground">
               Numer faktury ({`details.invoiceNumber`} →{" "}
               <span className="font-mono text-xs">P_2</span>)
             </span>
-            <Input {...register("invoiceNumber")} />
+            <Input {...register("invoiceNumber")} className="max-w-md" />
             {errors.invoiceNumber && (
               <p className="text-destructive text-xs">{errors.invoiceNumber.message}</p>
             )}
           </div>
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-1">
             <span className="text-muted-foreground">
               Data wystawienia ({`details.issueDate`} →{" "}
               <span className="font-mono text-xs">P_1</span>) — ISO YYYY-MM-DD
             </span>
             <Input
               {...register("issueDate")}
-              className="font-mono"
+              className="max-w-md font-mono"
             />
             {errors.issueDate && (
               <p className="text-destructive text-xs">{errors.issueDate.message}</p>
@@ -581,12 +501,12 @@ function InvoiceFormSections({
               Podgląd: {formatIsoDatePl(issueDate)}
             </span>
           </div>
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-1">
             <span className="text-muted-foreground">
               Data sprzedaży ({`details.saleDate`} →{" "}
               <span className="font-mono text-xs">P_6</span>) — ISO YYYY-MM-DD
             </span>
-            <Input {...register("saleDate")} className="font-mono" />
+            <Input {...register("saleDate")} className="max-w-md font-mono" />
             {errors.saleDate && (
               <p className="text-destructive text-xs">{errors.saleDate.message}</p>
             )}
@@ -597,15 +517,15 @@ function InvoiceFormSections({
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden shadow-sm">
-        <CardHeader className="border-b bg-muted/25">
-          <CardTitle className="text-lg">Pozycje faktury</CardTitle>
+      <Card>
+        <CardHeader>
+          <CardTitle>Pozycje</CardTitle>
           <CardDescription>
             Faktura {invoiceNumber || "—"} · {formatIsoDatePl(issueDate)} ·{" "}
             {initial.currency}
           </CardDescription>
         </CardHeader>
-        <CardContent className="overflow-x-auto p-5 md:p-6">
+        <CardContent className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -706,34 +626,60 @@ function InvoiceFormSections({
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden shadow-sm">
-        <CardHeader className="border-b bg-muted/25">
-          <CardTitle className="text-lg">Podsumowanie kwot</CardTitle>
+      <Card>
+        <CardHeader>
+          <CardTitle>Sumy</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-3 p-5 sm:grid-cols-3 md:p-6">
-          <div className="rounded-xl border bg-muted/15 p-4">
-            <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">Netto</p>
-            <p className="mt-1 text-xl font-semibold tabular-nums">{preview.totals.net.toFixed(2)} PLN</p>
-          </div>
-          <div className="rounded-xl border bg-muted/15 p-4">
-            <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">VAT</p>
-            <p className="mt-1 text-xl font-semibold tabular-nums">{preview.totals.vat.toFixed(2)} PLN</p>
-          </div>
-          <div className="rounded-xl border border-primary/30 bg-primary/5 p-4">
-            <p className="text-primary text-xs font-medium uppercase tracking-wide">Brutto</p>
-            <p className="mt-1 text-xl font-semibold tabular-nums">{preview.totals.gross.toFixed(2)} PLN</p>
-          </div>
+        <CardContent className="space-y-2 text-sm">
+          <p>Netto: {preview.totals.net.toFixed(2)} PLN</p>
+          <p>VAT: {preview.totals.vat.toFixed(2)} PLN</p>
+          <p className="font-medium">
+            Brutto: {preview.totals.gross.toFixed(2)} PLN
+          </p>
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden shadow-sm">
-        <CardHeader className="border-b bg-muted/25">
-          <CardTitle className="text-lg">Dodatkowy opis</CardTitle>
+      <Card>
+        <CardHeader>
+          <CardTitle>Dodatkowy opis</CardTitle>
           <CardDescription>
-            Opcjonalne uwagi przesyłane do KSeF jako DodatkowyOpis.
+            Treść trafia do KSeF jako DodatkowyOpis (klucz „Uwagi&quot;). Pole
+            opcjonalne — zostaw puste, jeśli nie potrzebujesz. Tekst prefiksu
+            (poniżej) jest zapamiętywany w tej przeglądarce i przy wgrywaniu PDF
+            z panelu wysyłany na serwer: jeśli pole Uwagi jest puste, a w tekście
+            PDF występuje ciąg zaczynający się od tego prefiksu (np.{" "}
+            <span className="font-mono">GAP_2026/WNR/355677/1</span>), zostanie
+            automatycznie użyty przy zapisie faktury. Możesz też włączyć
+            wstawianie samego prefiksu, gdy pole jest puste.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4 p-5 md:p-6">
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Checkbox
+              checked={autoPrefixGap}
+              onCheckedChange={onRemarksAutoPrefixChange}
+              aria-label="Wstaw domyślny prefiks do dodatkowego opisu, gdy pole jest puste"
+            />
+            <span className="text-muted-foreground text-sm">
+              Wstaw domyślny prefiks (gdy pole jest puste)
+            </span>
+          </div>
+          <div className="space-y-1 gap-2 flex flex-wrap items-center">
+            <label
+              htmlFor="remarks-prefix-text"
+              className="text-muted-foreground text-sm font-medium"
+            >
+              Tekst prefiksu
+            </label>
+            <Input
+              id="remarks-prefix-text"
+              value={remarksPrefixText}
+              onChange={(e) => onRemarksPrefixFieldChange(e.target.value)}
+              maxLength={120}
+              className="max-w-md font-mono text-sm"
+              aria-label="Tekst prefiksu dodatkowego opisu"
+            />
+          </div>
           <Textarea
             {...register("remarks")}
             aria-label="Dodatkowy opis (DodatkowyOpis w KSeF)"
@@ -741,44 +687,6 @@ function InvoiceFormSections({
             placeholder="np. numer zamówienia, uwagi do faktury…"
             className="text-sm"
           />
-          <details className="rounded-xl border bg-muted/15">
-            <summary className="cursor-pointer p-4 text-sm font-medium">
-              Automatyczne uzupełnianie opisu z PDF
-            </summary>
-            <div className="space-y-4 border-t p-4">
-              <p className="text-muted-foreground text-sm leading-relaxed">
-                Aplikacja może odnaleźć w PDF tekst zaczynający się od podanego
-                prefiksu, np. <span className="font-mono">GAP_2026</span>, i
-                wstawić go do uwag.
-              </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Checkbox
-                  checked={autoPrefixGap}
-                  onCheckedChange={onRemarksAutoPrefixChange}
-                  aria-label="Wstaw domyślny prefiks do dodatkowego opisu, gdy pole jest puste"
-                />
-                <span className="text-muted-foreground text-sm">
-                  Wstaw domyślny prefiks, gdy opis jest pusty
-                </span>
-              </div>
-              <div className="space-y-1.5">
-                <label
-                  htmlFor="remarks-prefix-text"
-                  className="text-sm font-medium"
-                >
-                  Tekst prefiksu
-                </label>
-                <Input
-                  id="remarks-prefix-text"
-                  value={remarksPrefixText}
-                  onChange={(e) => onRemarksPrefixFieldChange(e.target.value)}
-                  maxLength={120}
-                  className="max-w-md font-mono text-sm"
-                  aria-label="Tekst prefiksu dodatkowego opisu"
-                />
-              </div>
-            </div>
-          </details>
         </CardContent>
       </Card>
     </>
@@ -868,17 +776,15 @@ export function InvoiceDetailPageClient({
   }
 
   return (
-    <div className="space-y-6 pb-8">
-      <section className="relative overflow-hidden rounded-2xl border bg-card shadow-sm">
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-sky-500/5" />
-        <div className="relative flex flex-col gap-5 p-5 lg:flex-row lg:items-center lg:justify-between md:p-6">
+    <div className="space-y-8">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <InvoiceDetailTitleBlock
           fileName={fileName}
           status={status}
           ksefReference={ksefReference}
           errorMessage={errorMessage}
         />
-        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center lg:justify-end">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
           <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
@@ -886,14 +792,13 @@ export function InvoiceDetailPageClient({
               onClick={onDiscard}
               disabled={!isDirty}
             >
-              <RotateCcw /> Anuluj zmiany
+              Anuluj zmiany
             </Button>
             <Button
               type="submit"
               form="invoice-parsed-edit"
               disabled={!isDirty || savePending}
             >
-              {savePending ? <LoaderCircle className="animate-spin" /> : <Save />}
               {savePending ? "Zapisywanie…" : "Zapisz"}
             </Button>
           </div>
@@ -905,14 +810,13 @@ export function InvoiceDetailPageClient({
             ksefEnvironment={ksefEnvironment}
           />
         </div>
-        </div>
-      </section>
+      </div>
 
       <FormProvider {...form}>
         <form
           id="invoice-parsed-edit"
           onSubmit={onSave}
-          className="space-y-6"
+          className="space-y-8"
         >
           <InvoiceFormSections
             initial={initial}

@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { PARTY_IDENTIFIER_TYPES } from "@/lib/invoice/party-tax-identifier";
 
 /** Max upload size for PDF (5 MiB) */
 export const MAX_PDF_BYTES = 5 * 1024 * 1024;
@@ -47,61 +46,20 @@ export const vatSummaryGroupSchema = z.object({
   grossAmount: z.number().nonnegative(),
 });
 
-const identifierFieldsSchema = {
-  nip: z.string(),
-  identifierType: z.enum(PARTY_IDENTIFIER_TYPES).optional(),
-  identifierValue: z.string().optional(),
-  identifierCountryCode: z.string().optional(),
-};
-
-function validatePartyIdentifier(
-  party: {
-    nip: string;
-    identifierType?: (typeof PARTY_IDENTIFIER_TYPES)[number];
-    identifierValue?: string;
-    identifierCountryCode?: string;
-  },
-  ctx: z.RefinementCtx,
-) {
-  const type = party.identifierType ?? "nip";
-  const value = (party.identifierValue ?? party.nip).trim().toUpperCase();
-  const country = party.identifierCountryCode?.trim().toUpperCase() ?? "";
-
-  if (type === "nip" && !/^\d{10}$/.test(value.replace(/\D/g, ""))) {
-    ctx.addIssue({ code: "custom", path: ["identifierValue"], message: "NIP musi mieć 10 cyfr" });
-  }
-  if (type === "vat_ue") {
-    if (!/^[A-Z]{2}$/.test(country)) {
-      ctx.addIssue({ code: "custom", path: ["identifierCountryCode"], message: "Wybierz dwuliterowy kod kraju VAT UE" });
-    }
-    if (!/^[A-Z0-9+*]{1,12}$/.test(value)) {
-      ctx.addIssue({ code: "custom", path: ["identifierValue"], message: "Nieprawidłowy numer VAT UE" });
-    }
-  }
-  if (type === "other") {
-    if (country && !/^[A-Z]{2}$/.test(country)) {
-      ctx.addIssue({ code: "custom", path: ["identifierCountryCode"], message: "Kod kraju musi mieć 2 litery" });
-    }
-    if (!/^[A-Z0-9+*\-\.]{1,50}$/.test(value)) {
-      ctx.addIssue({ code: "custom", path: ["identifierValue"], message: "Wpisz identyfikator podatkowy" });
-    }
-  }
-}
-
-const partySchema = z
-  .object({
-    name: z.string().min(1),
-    addressLines: z.array(z.string()),
-    ...identifierFieldsSchema,
-  })
-  .superRefine(validatePartyIdentifier);
-
 export const parsedInvoiceSchema = z.object({
   invoiceNumber: z.string().min(1),
   issueDate: z.string().min(1),
   saleDate: z.string().min(1),
-  seller: partySchema,
-  buyer: partySchema,
+  seller: z.object({
+    name: z.string().min(1),
+    addressLines: z.array(z.string()),
+    nip: z.string().regex(/^\d{10}$/),
+  }),
+  buyer: z.object({
+    name: z.string().min(1),
+    addressLines: z.array(z.string()),
+    nip: z.string().regex(/^\d{10}$/),
+  }),
   bankName: z.string().optional(),
   bankAccount: z.string().optional(),
   paymentDays: z.number().int().nonnegative().optional(),
@@ -124,7 +82,7 @@ export type ParsedInvoice = z.infer<typeof parsedInvoiceSchema>;
 const partialPartySchema = z.object({
   name: z.string(),
   addressLines: z.array(z.string()),
-  ...identifierFieldsSchema,
+  nip: z.string().regex(/^(\d{10})?$/),
 });
 
 /**

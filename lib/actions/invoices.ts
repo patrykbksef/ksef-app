@@ -10,119 +10,17 @@ import { parseInvoiceWithAzureDi } from "@/lib/invoice/parse-invoice-azure-di";
 import { parseInterRiskInvoiceTextLenient } from "@/lib/invoice/parser";
 import { extractTextFromPdfBuffer } from "@/lib/invoice/pdf-text";
 import { mergeRemarksFromPdfLookup, parseRemarksLookupPrefixFromFormData } from "@/lib/invoice/remarks-lookup-from-pdf";
-import {
-  KsefConnectionTestError,
-  sendInvoiceToKsefWithToken,
-  testKsefInvoiceWriteAccess,
-} from "@/lib/ksef/client";
-import {
-  resolveKsefEnvironment,
-  type KsefEnvironment,
-} from "@/lib/ksef/config";
+import { sendInvoiceToKsefWithToken } from "@/lib/ksef/client";
+import { resolveKsefEnvironment } from "@/lib/ksef/config";
 import { recalcParsedInvoice } from "@/lib/invoice/recalc-parsed-invoice";
 import { assertUnverifiedCanUpload } from "@/lib/invoice/upload-limits";
-import {
-  fileUploadSchema,
-  parsedInvoiceSchema,
-  type ParsedInvoice,
-} from "@/lib/validations/invoice";
+import { fileUploadSchema, parsedInvoiceSchema, type ParsedInvoice } from "@/lib/validations/invoice";
 import { z } from "zod";
-import {
-  ksefTokenForProfile,
-  profileRowSchema,
-  type ProfileRow,
-} from "@/lib/validations/profile";
+import { ksefTokenForProfile, profileRowSchema } from "@/lib/validations/profile";
 
 export type UploadInvoiceState = {
   error?: string;
 };
-
-type KsefUploadCredentials = {
-  contextNip: string;
-  ksefToken: string;
-  ksefEnvironment: KsefEnvironment;
-};
-
-type KsefUploadPreflight =
-  | { ok: true; credentials: KsefUploadCredentials }
-  | { ok: false; error: string };
-
-async function verifyKsefBeforeInvoiceProcessing(
-  profile: ProfileRow,
-  userId: string,
-): Promise<KsefUploadPreflight> {
-  const ksefEnvironment = resolveKsefEnvironment(profile.ksef_environment);
-  let ksefToken: string | null;
-
-  try {
-    ksefToken = ksefTokenForProfile(profile);
-  } catch (error) {
-    console.error("Invoice upload: saved KSeF token could not be decrypted", {
-      scope: "invoice.upload.preflight",
-      userId,
-      ksefEnvironment,
-      errorMessage: error instanceof Error ? error.message : "Unknown error",
-    });
-    return {
-      ok: false,
-      error:
-        "Nie udało się odczytać zapisanego tokenu KSeF. Wprowadź token ponownie w Ustawieniach.",
-    };
-  }
-
-  if (!profile.nip || !ksefToken) {
-    return {
-      ok: false,
-      error: "Uzupełnij NIP i token KSeF w Ustawieniach przed dodaniem faktury.",
-    };
-  }
-
-  try {
-    await testKsefInvoiceWriteAccess({
-      contextNip: profile.nip,
-      ksefToken,
-      ksefEnvironment,
-    });
-  } catch (error) {
-    if (error instanceof KsefConnectionTestError) {
-      if (error.code === "AUTHENTICATION_FAILED") {
-        return {
-          ok: false,
-          error:
-            "KSeF odrzucił token dla podanego NIP-u. Popraw NIP lub token w Ustawieniach, zanim dodasz fakturę.",
-        };
-      }
-      if (error.code === "INVOICE_WRITE_MISSING") {
-        return {
-          ok: false,
-          error:
-            "Token KSeF nie ma uprawnienia do wystawiania faktur (InvoiceWrite). Popraw token w Ustawieniach.",
-        };
-      }
-    }
-
-    console.error("Invoice upload: KSeF preflight failed", {
-      scope: "invoice.upload.preflight",
-      userId,
-      ksefEnvironment,
-      errorMessage: error instanceof Error ? error.message : "Unknown error",
-    });
-    return {
-      ok: false,
-      error:
-        "Nie udało się potwierdzić połączenia z KSeF. Faktura nie została przetworzona — spróbuj ponownie później.",
-    };
-  }
-
-  return {
-    ok: true,
-    credentials: {
-      contextNip: profile.nip,
-      ksefToken,
-      ksefEnvironment,
-    },
-  };
-}
 
 export async function uploadInvoice(_prev: UploadInvoiceState, formData: FormData): Promise<UploadInvoiceState> {
   const file = formData.get("file");
@@ -171,9 +69,6 @@ export async function uploadInvoice(_prev: UploadInvoiceState, formData: FormDat
 
   const limitErr = await assertUnverifiedCanUpload(supabase, user.id, profile.verified);
   if (limitErr) return limitErr;
-
-  const ksefPreflight = await verifyKsefBeforeInvoiceProcessing(profile, user.id);
-  if (!ksefPreflight.ok) return { error: ksefPreflight.error };
 
   let text: string;
   try {
@@ -244,10 +139,10 @@ export async function uploadInvoice(_prev: UploadInvoiceState, formData: FormDat
     if (autoSend) {
       try {
         const result = await sendInvoiceToKsefWithToken({
-          contextNip: ksefPreflight.credentials.contextNip,
-          ksefToken: ksefPreflight.credentials.ksefToken,
+          contextNip: xmlOptions.issuerNip,
+          ksefToken: ksefTokenForProfile(profile)!,
           invoiceXml: xml,
-          ksefEnvironment: ksefPreflight.credentials.ksefEnvironment,
+          ksefEnvironment: resolveKsefEnvironment(profile.ksef_environment),
         });
         ksefRef = result.invoiceKsefNumber ?? result.invoiceReferenceNumber ?? null;
         status = "success";
@@ -347,9 +242,6 @@ export async function uploadInvoiceAi(_prev: UploadInvoiceState, formData: FormD
   const limitErr = await assertUnverifiedCanUpload(supabase, user.id, profile.verified);
   if (limitErr) return limitErr;
 
-  const ksefPreflight = await verifyKsefBeforeInvoiceProcessing(profile, user.id);
-  if (!ksefPreflight.ok) return { error: ksefPreflight.error };
-
   let buf: ArrayBuffer;
   try {
     buf = await file.arrayBuffer();
@@ -399,40 +291,37 @@ export async function uploadInvoiceAi(_prev: UploadInvoiceState, formData: FormD
     parseRemarksLookupPrefixFromFormData(formData),
   );
 
-  let xml: string | null = null;
+  let xml: string;
+  try {
+    xml = buildFa3XmlFromParsedInvoice(parsedInvoice, xmlOptions);
+  } catch (e) {
+    const errorMessage = e instanceof Error ? e.message : String(e);
+    console.error("Invoice upload (AI): XML build failed", {
+      scope: "invoice.upload.ai",
+      userId: user.id,
+      fileName: file.name,
+      fileSize: file.size,
+      step: "xml",
+      errorMessage,
+    });
+    return {
+      error: e instanceof Error ? e.message : "Nie udało się zbudować XML KSeF z faktury",
+    };
+  }
+
   const autoSend = profile.auto_send === true;
 
   let status: "pending_review" | "success" | "error" = "pending_review";
   let ksefRef: string | null = null;
   let errMsg: string | null = null;
 
-  const readyForKsef = parsedInvoiceSchema.safeParse(parsedInvoice);
-  if (readyForKsef.success) {
-    try {
-      xml = buildFa3XmlFromParsedInvoice(readyForKsef.data, xmlOptions);
-    } catch (e) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
-      console.error("Invoice upload (AI): XML build failed", {
-        scope: "invoice.upload.ai",
-        userId: user.id,
-        fileName: file.name,
-        fileSize: file.size,
-        step: "xml",
-        errorMessage,
-      });
-      return {
-        error: e instanceof Error ? e.message : "Nie udało się zbudować XML KSeF z faktury",
-      };
-    }
-  }
-
-  if (autoSend && xml) {
+  if (autoSend) {
     try {
       const result = await sendInvoiceToKsefWithToken({
-        contextNip: ksefPreflight.credentials.contextNip,
-        ksefToken: ksefPreflight.credentials.ksefToken,
+        contextNip: xmlOptions.issuerNip,
+        ksefToken: ksefTokenForProfile(profile)!,
         invoiceXml: xml,
-        ksefEnvironment: ksefPreflight.credentials.ksefEnvironment,
+        ksefEnvironment: resolveKsefEnvironment(profile.ksef_environment),
       });
       ksefRef = result.invoiceKsefNumber ?? result.invoiceReferenceNumber ?? null;
       status = "success";
@@ -538,9 +427,6 @@ export async function uploadInvoiceAzureDi(_prev: UploadInvoiceState, formData: 
   const limitErr = await assertUnverifiedCanUpload(supabase, user.id, profile.verified);
   if (limitErr) return limitErr;
 
-  const ksefPreflight = await verifyKsefBeforeInvoiceProcessing(profile, user.id);
-  if (!ksefPreflight.ok) return { error: ksefPreflight.error };
-
   let buf: ArrayBuffer;
   try {
     buf = await file.arrayBuffer();
@@ -587,40 +473,37 @@ export async function uploadInvoiceAzureDi(_prev: UploadInvoiceState, formData: 
     parseRemarksLookupPrefixFromFormData(formData),
   );
 
-  let xml: string | null = null;
+  let xml: string;
+  try {
+    xml = buildFa3XmlFromParsedInvoice(parsedInvoice, xmlOptions);
+  } catch (e) {
+    const errorMessage = e instanceof Error ? e.message : String(e);
+    console.error("Invoice upload (Azure DI): XML build failed", {
+      scope: "invoice.upload.azure-di",
+      userId: user.id,
+      fileName: file.name,
+      fileSize: file.size,
+      step: "xml",
+      errorMessage,
+    });
+    return {
+      error: e instanceof Error ? e.message : "Nie udało się zbudować XML KSeF z faktury",
+    };
+  }
+
   const autoSend = profile.auto_send === true;
 
   let status: "pending_review" | "success" | "error" = "pending_review";
   let ksefRef: string | null = null;
   let errMsg: string | null = null;
 
-  const readyForKsef = parsedInvoiceSchema.safeParse(parsedInvoice);
-  if (readyForKsef.success) {
-    try {
-      xml = buildFa3XmlFromParsedInvoice(readyForKsef.data, xmlOptions);
-    } catch (e) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
-      console.error("Invoice upload (Azure DI): XML build failed", {
-        scope: "invoice.upload.azure-di",
-        userId: user.id,
-        fileName: file.name,
-        fileSize: file.size,
-        step: "xml",
-        errorMessage,
-      });
-      return {
-        error: e instanceof Error ? e.message : "Nie udało się zbudować XML KSeF z faktury",
-      };
-    }
-  }
-
-  if (autoSend && xml) {
+  if (autoSend) {
     try {
       const result = await sendInvoiceToKsefWithToken({
-        contextNip: ksefPreflight.credentials.contextNip,
-        ksefToken: ksefPreflight.credentials.ksefToken,
+        contextNip: xmlOptions.issuerNip,
+        ksefToken: ksefTokenForProfile(profile)!,
         invoiceXml: xml,
-        ksefEnvironment: ksefPreflight.credentials.ksefEnvironment,
+        ksefEnvironment: resolveKsefEnvironment(profile.ksef_environment),
       });
       ksefRef = result.invoiceKsefNumber ?? result.invoiceReferenceNumber ?? null;
       status = "success";
@@ -784,11 +667,7 @@ export async function sendInvoiceToKsef(_prev: SendInvoiceState, formData: FormD
 
   const parsedStored = parsedInvoiceSchema.safeParse(invRaw.parsed_data);
   if (!parsedStored.success) {
-    return {
-      error:
-        parsedStored.error.issues[0]?.message ??
-        "Dane faktury wymagają uzupełnienia przed wysłaniem do KSeF",
-    };
+    return { error: "Zapis faktury jest uszkodzony — wgraj ponownie PDF" };
   }
 
   let xml: string;

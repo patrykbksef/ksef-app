@@ -3,7 +3,6 @@ import type { ParsedInvoice, PartialParsedInvoice } from "@/lib/validations/invo
 import type { ProfileRow } from "@/lib/validations/profile";
 import { profileReadyForKsefXml } from "@/lib/validations/profile";
 import { mergeLeadingNameLinesFromAddress } from "@/lib/invoice/party-name-address";
-import { resolvePartyTaxIdentifier } from "@/lib/invoice/party-tax-identifier";
 
 function joinAddress(lines: string[]): string {
   return lines.filter(Boolean).join(", ") || "—";
@@ -42,10 +41,8 @@ function normalizeNip(n: string): string {
 export function issuerPartyFromParsed(data: PartialParsedInvoice, issuerNip: string): "seller" | "buyer" | null {
   const p = normalizeNip(issuerNip);
   if (p.length !== 10) return null;
-  const sellerId = resolvePartyTaxIdentifier(data.seller);
-  const buyerId = resolvePartyTaxIdentifier(data.buyer);
-  if (sellerId.type === "nip" && p === normalizeNip(sellerId.value)) return "seller";
-  if (buyerId.type === "nip" && p === normalizeNip(buyerId.value)) return "buyer";
+  if (p === normalizeNip(data.seller.nip)) return "seller";
+  if (p === normalizeNip(data.buyer.nip)) return "buyer";
   return null;
 }
 
@@ -56,13 +53,21 @@ export function issuerPartyFromParsed(data: PartialParsedInvoice, issuerNip: str
 export function podmiot2CounterpartyFromParsed(
   data: PartialParsedInvoice,
   issuerNip: string,
-): PartialParsedInvoice["seller"] {
+): { nip: string; name: string; addressLines: string[] } {
   const side = issuerPartyFromParsed(data, issuerNip);
   if (side === "seller") {
-    return mergeLeadingNameLinesFromAddress(data.buyer);
+    return mergeLeadingNameLinesFromAddress({
+      nip: data.buyer.nip,
+      name: data.buyer.name,
+      addressLines: data.buyer.addressLines,
+    });
   }
   if (side === "buyer") {
-    return mergeLeadingNameLinesFromAddress(data.seller);
+    return mergeLeadingNameLinesFromAddress({
+      nip: data.seller.nip,
+      name: data.seller.name,
+      addressLines: data.seller.addressLines,
+    });
   }
   console.warn(
     "[KSeF XML] NIP profilu nie zgadza się ze sprzedawcą ani nabywcą z PDF — Podmiot2 jak dawniej (parsed.seller)",
@@ -73,41 +78,11 @@ export function podmiot2CounterpartyFromParsed(
       buyerNip: data.buyer.nip,
     },
   );
-  return mergeLeadingNameLinesFromAddress(data.seller);
-}
-
-function buyerIdentifierForKsef(
-  party: PartialParsedInvoice["seller"],
-): Record<string, string | boolean> {
-  const identifier = resolvePartyTaxIdentifier(party);
-  if (identifier.type === "nip") return { nip: normalizeNip(identifier.value) };
-  if (identifier.type === "vat_ue") {
-    return {
-      countryCodeUE: identifier.countryCode ?? "",
-      vatUE: identifier.value,
-    };
-  }
-  if (identifier.type === "other") {
-    return {
-      ...(identifier.countryCode ? { countryCode: identifier.countryCode } : {}),
-      idNumber: identifier.value,
-    };
-  }
-  return { noId: true };
-}
-
-function buyerAddressForKsef(party: PartialParsedInvoice["seller"]) {
-  const identifier = resolvePartyTaxIdentifier(party);
-  const countryCode = identifier.countryCode;
-  const lines = party.addressLines.map((line) => line.trim()).filter(Boolean);
-  if (countryCode && countryCode !== "PL") {
-    return {
-      countryCode,
-      line1: lines[0] || "—",
-      ...(lines.length > 1 ? { line2: lines.slice(1).join(", ") } : {}),
-    };
-  }
-  return joinAddress(lines);
+  return mergeLeadingNameLinesFromAddress({
+    nip: data.seller.nip,
+    name: data.seller.name,
+    addressLines: data.seller.addressLines,
+  });
 }
 
 /** ksef-lite FA(3) JSON input — same object passed to `KSefInvoiceGenerator.generate`. */
@@ -115,7 +90,6 @@ export function buildKsefLiteInvoiceInput(data: ParsedInvoice, options: BuildFa3
   const issueDate = new Date(data.issueDate);
   const saleDate = new Date(data.saleDate);
   const podmiot2 = podmiot2CounterpartyFromParsed(data, options.issuerNip);
-  const podmiot2Identifier = buyerIdentifierForKsef(podmiot2);
 
   return {
     seller: {
@@ -125,9 +99,9 @@ export function buildKsefLiteInvoiceInput(data: ParsedInvoice, options: BuildFa3
     },
     buyer: {
       // Podmiot2 = kontrahent (druga strona), nie Twój NIP z profilu.
-      ...podmiot2Identifier,
+      nip: podmiot2.nip,
       name: podmiot2.name,
-      address: buyerAddressForKsef(podmiot2),
+      address: joinAddress(podmiot2.addressLines),
     },
     details: {
       invoiceNumber: data.invoiceNumber,
