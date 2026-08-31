@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState, useTransition } from "react";
+import { FileCheck2, FileSearch, FileUp, LoaderCircle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { uploadInvoice, type UploadInvoiceState } from "@/lib/actions/invoices";
@@ -80,7 +81,7 @@ export function DashboardUpload({ disabled }: { disabled: boolean }) {
   );
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
+    <form onSubmit={onSubmit} className="space-y-5">
       <input
         ref={inputRef}
         type="file"
@@ -92,14 +93,6 @@ export function DashboardUpload({ disabled }: { disabled: boolean }) {
       />
 
       <div
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            if (!disabled) inputRef.current?.click();
-          }
-        }}
         onDragOver={(e) => {
           e.preventDefault();
           if (!disabled) setDragOver(true);
@@ -107,23 +100,47 @@ export function DashboardUpload({ disabled }: { disabled: boolean }) {
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
         className={cn(
-          "border-border focus-visible:ring-ring/50 rounded-lg border-2 border-dashed p-8 text-center transition-colors outline-none focus-visible:ring-[3px]",
-          dragOver && !disabled && "border-primary bg-primary/5",
+          "rounded-2xl border-2 border-dashed bg-muted/15 px-5 py-10 text-center transition-all md:px-8 md:py-12",
+          dragOver && !disabled && "scale-[1.01] border-primary bg-primary/5 shadow-sm",
+          file && "border-emerald-500/50 bg-emerald-500/5",
           disabled && "pointer-events-none opacity-50",
         )}
       >
-        <p className="text-foreground font-medium">
-          Przeciągnij plik PDF tutaj
+        <div
+          className={cn(
+            "mx-auto flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary",
+            file && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300",
+          )}
+        >
+          {file ? <FileCheck2 className="size-7" /> : <FileUp className="size-7" />}
+        </div>
+        <p className="mt-4 text-lg font-semibold">
+          {file ? "Plik jest gotowy" : "Dodaj fakturę PDF"}
         </p>
-        <p className="text-muted-foreground mt-2 text-sm">lub</p>
-        <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+        <p className="text-muted-foreground mx-auto mt-1 max-w-md text-sm leading-relaxed">
+          {file
+            ? "Możesz rozpocząć odczytywanie danych albo wybrać inny dokument."
+            : "Przeciągnij dokument w to miejsce lub wybierz go z urządzenia."}
+        </p>
+        {file ? (
+          <div className="mx-auto mt-5 flex max-w-lg items-center gap-3 rounded-xl border bg-background p-3 text-left shadow-sm">
+            <FileSearch className="size-5 shrink-0 text-primary" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">{file.name}</p>
+              <p className="text-muted-foreground text-xs">
+                {(file.size / 1024).toFixed(1)} KB
+              </p>
+            </div>
+          </div>
+        ) : null}
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
           <Button
             type="button"
-            variant="default"
+            variant={file ? "outline" : "default"}
             disabled={disabled}
             onClick={() => inputRef.current?.click()}
           >
-            Wybierz plik
+            <FileUp /> {file ? "Wybierz inny plik" : "Wybierz plik"}
           </Button>
           {file ? (
             <Button
@@ -132,20 +149,21 @@ export function DashboardUpload({ disabled }: { disabled: boolean }) {
               disabled={disabled}
               onClick={clearFile}
             >
-              Usuń wybór
+              <Trash2 /> Usuń
             </Button>
           ) : null}
         </div>
-        {file ? (
-          <p className="text-muted-foreground mt-4 break-all text-sm">
-            Wybrano: <span className="text-foreground font-medium">{file.name}</span>{" "}
-            ({(file.size / 1024).toFixed(1)} KB)
-          </p>
-        ) : null}
+        <p className="text-muted-foreground mt-5 text-xs">PDF · maksymalnie 5 MB</p>
       </div>
 
-      <Button type="submit" disabled={disabled || !file || pending}>
-        {pending ? "Przetwarzanie…" : "Wyślij i sparsuj"}
+      <Button
+        type="submit"
+        size="lg"
+        className="w-full"
+        disabled={disabled || !file || pending}
+      >
+        {pending ? <LoaderCircle className="animate-spin" /> : <FileSearch />}
+        {pending ? "Odczytywanie faktury…" : "Prześlij i odczytaj dane"}
       </Button>
     </form>
   );
