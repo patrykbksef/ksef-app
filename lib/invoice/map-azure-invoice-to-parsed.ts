@@ -5,6 +5,10 @@ import type {
 } from "@azure-rest/ai-document-intelligence";
 import type { ParsedInvoice } from "@/lib/validations/invoice";
 import { isValidNipChecksum } from "@/lib/validations/profile";
+import {
+  taxIdentifierFields,
+  type PartyTaxIdentifierFields,
+} from "@/lib/invoice/party-tax-identifier";
 
 function pickField(
   fields: Record<string, DocumentFieldOutput> | undefined,
@@ -129,6 +133,23 @@ function extractAllPlNipsFromContent(text: string): string[] {
 
 function nipFromTaxField(f: DocumentFieldOutput | undefined): string | undefined {
   return extractPlNip(fieldString(f));
+}
+
+function taxIdentifierFromField(
+  f: DocumentFieldOutput | undefined,
+): PartyTaxIdentifierFields | undefined {
+  const raw = fieldString(f)?.trim().toUpperCase();
+  if (!raw) return undefined;
+
+  const nip = extractPlNip(raw);
+  if (nip) return taxIdentifierFields("nip", nip);
+
+  const compact = raw.replace(/[\s.\-]/g, "");
+  const vatUe = compact.match(/^([A-Z]{2})([A-Z0-9+*]{1,12})$/);
+  if (vatUe) return taxIdentifierFields("vat_ue", vatUe[2]!, vatUe[1]!);
+
+  const other = compact.replace(/[^A-Z0-9+*\-.]/g, "").slice(0, 50);
+  return other ? taxIdentifierFields("other", other) : undefined;
 }
 
 function pickObjectField(
@@ -272,13 +293,17 @@ export function mapAzureInvoiceAnalyzeResult(
     fieldString(pickField(fields, "CustomerName", "BuyerName", "ShipToName")) ??
     "";
 
-  let sellerNip =
-    nipFromTaxField(pickField(fields, "VendorTaxId", "SellerTaxId")) ??
-    extractPlNip(sellerName);
-  let buyerNip =
-    nipFromTaxField(
-      pickField(fields, "CustomerTaxId", "CustomerId", "BuyerTaxId"),
-    ) ?? extractPlNip(buyerName);
+  const sellerTaxField = pickField(fields, "VendorTaxId", "SellerTaxId");
+  const buyerTaxField = pickField(
+    fields,
+    "CustomerTaxId",
+    "CustomerId",
+    "BuyerTaxId",
+  );
+  let sellerIdentifier = taxIdentifierFromField(sellerTaxField);
+  let buyerIdentifier = taxIdentifierFromField(buyerTaxField);
+  let sellerNip = nipFromTaxField(sellerTaxField) ?? extractPlNip(sellerName);
+  let buyerNip = nipFromTaxField(buyerTaxField) ?? extractPlNip(buyerName);
 
   const content = result.content ?? "";
   const nipsInDoc = extractAllPlNipsFromContent(content);
@@ -290,6 +315,12 @@ export function mapAzureInvoiceAnalyzeResult(
   }
   if (!sellerNip) {
     sellerNip = nipsInDoc.find((n) => n !== buyerNip);
+  }
+  if (!sellerIdentifier && sellerNip) {
+    sellerIdentifier = taxIdentifierFields("nip", sellerNip);
+  }
+  if (!buyerIdentifier && buyerNip) {
+    buyerIdentifier = taxIdentifierFields("nip", buyerNip);
   }
 
   const sellerLines = fieldAddressLines(pickField(fields, "VendorAddress"));
@@ -312,7 +343,6 @@ export function mapAzureInvoiceAnalyzeResult(
 
   if (!invoiceNumber || lineItems.length === 0) return null;
   if (!sellerName || !buyerName) return null;
-  if (!sellerNip || !buyerNip) return null;
 
   const paymentDaysRaw = fieldNumber(pickField(fields, "PaymentTerm", "PaymentTerms"));
   const dueDateStr = fieldDateIso(pickField(fields, "DueDate"));
@@ -339,12 +369,12 @@ export function mapAzureInvoiceAnalyzeResult(
     saleDate: saleDate || issueDate,
     seller: {
       name: sellerName,
-      nip: sellerNip,
+      ...(sellerIdentifier ?? taxIdentifierFields("none")),
       addressLines: sellerLines.length > 0 ? sellerLines : ["—"],
     },
     buyer: {
       name: buyerName,
-      nip: buyerNip,
+      ...(buyerIdentifier ?? taxIdentifierFields("none")),
       addressLines: buyerLines.length > 0 ? buyerLines : ["—"],
     },
     bankName: fieldString(pickField(fields, "BankName")) ?? undefined,

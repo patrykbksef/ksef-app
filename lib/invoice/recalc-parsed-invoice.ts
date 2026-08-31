@@ -1,4 +1,8 @@
-import type { InvoiceLineItem, ParsedInvoice, PartialParsedInvoice } from "@/lib/validations/invoice";
+import type {
+  InvoiceLineItem,
+  ParsedInvoice,
+  PartialParsedInvoice,
+} from "@/lib/validations/invoice";
 
 type VatSummaryGroup = ParsedInvoice["vatSummary"][number];
 
